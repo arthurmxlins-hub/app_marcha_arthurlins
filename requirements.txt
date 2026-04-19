@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+matplotlib
+scipy
+statsmodels
+ezc3d
+openpyxl
