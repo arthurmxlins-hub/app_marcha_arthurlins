@@ -1155,7 +1155,20 @@ if st.session_state.processadores:
     # =========================================================================
     with tab6:
         st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
-        
+                # --- FLUXO DE PROCESSAMENTO ESTATÍSTICO ---
+        with st.expander("🔍 Entenda o Fluxo de Decisão Estatística", expanded=True):
+            st.markdown("""
+            O sistema segue este protocolo para garantir a validade das comparações entre grupos:
+            1.  **Teste de Normalidade (Shapiro-Wilk):** * Se *p > 0.05* em ambos os grupos: A distribuição é considerada **Normal**.
+                * Se *p < 0.05* em qualquer grupo: A distribuição é **Não Normal**.
+            2.  **Teste de Homocedasticidade (Levene):**
+                * Avalia se as variâncias dos grupos são iguais (Homogêneas).
+            3.  **Escolha do Teste de Hipótese:**
+                * **Normal + Variâncias Iguais:** Teste T de Student (Paramétrico).
+                * **Normal + Variâncias Diferentes:** Teste T de Welch (Paramétrico).
+                * **Não Normal:** Teste de Mann-Whitney U (Não Paramétrico).
+            """)
+
         grupos = sorted(list(set([p.grupo for p in st.session_state.processadores])))
         
         if len(grupos) < 2:
