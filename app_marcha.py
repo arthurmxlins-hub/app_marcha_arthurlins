@@ -1230,7 +1230,6 @@ if st.session_state.processadores:
                             s = p.obter_stats() or {}
                             val = s.get(key1, {}).get(key2, np.nan)
                         elif cat == 'coord_fase':
-                            
                             if hasattr(p, 'coord_vetorial_series') and key1 in p.coord_vetorial_series:
                                 fatia = p.coord_vetorial_series[key1][inicio:fim]
                             else:
@@ -1242,44 +1241,48 @@ if st.session_state.processadores:
                                 idxs = np.digitize(gamma, [0, 45, 135, 225, 315, 360])
                                 map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
                                 fatia = [map_labels[i] for i in idxs[inicio:fim]]
-			
-									if not np.isnan(val):
-			                            if p.grupo == grupos[0]: data_g1.append(val)
-			                            elif p.grupo == grupos[1]: data_g2.append(val)
-			                    except: continue
-			
-			                if len(data_g1) > 2 and len(data_g2) > 2:
-			                    _, p_norm1 = sp_stats.shapiro(data_g1)
-			                    _, p_norm2 = sp_stats.shapiro(data_g2)
-                                is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
+                            
+                            if len(fatia) > 0:
+                                val = (fatia.count(key2) / len(fatia)) * 100
+                        
+                        if not np.isnan(val):
+                            if p.grupo == grupos[0]: data_g1.append(val)
+                            elif p.grupo == grupos[1]: data_g2.append(val)
+                    except:
+                        continue
+
+                if len(data_g1) > 2 and len(data_g2) > 2:
+                    _, p_norm1 = sp_stats.shapiro(data_g1)
+                    _, p_norm2 = sp_stats.shapiro(data_g2)
+                    is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
                     
-                                _, p_lev = sp_stats.levene(data_g1, data_g2)
-                                equal_var = (p_lev > 0.05)
+                    _, p_lev = sp_stats.levene(data_g1, data_g2)
+                    equal_var = (p_lev > 0.05)
 
-                                if is_normal:
-                                    if equal_var:
-                                       test_name = "Teste T (Normalidade e Homocedasticidade)"
-                                    else:
-                                        test_name = "Teste T - Welch (Normalidade e Heterocedasticidade)"
+                    if is_normal:
+                        if equal_var:
+                            test_name = "Teste T (Normalidade e Homocedasticidade)"
+                        else:
+                            test_name = "Teste T - Welch (Normalidade e Heterocedasticidade)"
                         
-                                    _, p_val = sp_stats.ttest_ind(data_g1, data_g2, equal_var=equal_var)
+                        _, p_val = sp_stats.ttest_ind(data_g1, data_g2, equal_var=equal_var)
                         
+                        # Cálculo do Tamanho do Efeito (Cohen's d)
+                        s_pooled = np.sqrt((np.var(data_g1, ddof=1) + np.var(data_g2, ddof=1)) / 2)
+                        effect_size = (np.mean(data_g1) - np.mean(data_g2)) / s_pooled if s_pooled > 0 else 0
+                    else:
+                        test_name = "Mann-Whitney (Não Paramétrico - Distribuição Não Normal)"
+                        u_stat, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
                         
-                                    s_pooled = np.sqrt((np.var(data_g1, ddof=1) + np.var(data_g2, ddof=1)) / 2)
-                                    effect_size = (np.mean(data_g1) - np.mean(data_g2)) / s_pooled if s_pooled > 0 else 0
-                                else:
-                                    test_name = "Mann-Whitney (Não Paramétrico - Distribuição Não Normal)"
-                                    u_stat, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
-                        
-                        
-                                    effect_size = 1 - (2 * u_stat) / (len(data_g1) * len(data_g2))
+                        # Cálculo do Tamanho do Efeito (r de Rosenthal)
+                        effect_size = 1 - (2 * u_stat) / (len(data_g1) * len(data_g2))
 
-                                results_table.append({
-                                    "Variável": label, "Teste": test_name,
-                                    "Normalidade (p)": f"{min(p_norm1, p_norm2):.3f}",
-                                    "P-Value": f"{p_val:.4f}", "Efeito": f"{abs(effect_size):.2f}",
-                                    "Resultado": "✅ SIGNIFICANTE" if p_val < 0.05 else "❌ n.s."
-                                })
+                    results_table.append({
+                        "Variável": label, "Teste": test_name,
+                        "Normalidade (p)": f"{min(p_norm1, p_norm2):.3f}",
+                        "P-Value": f"{p_val:.4f}", "Efeito": f"{abs(effect_size):.2f}",
+                        "Resultado": "✅ SIGNIFICANTE" if p_val < 0.05 else "❌ n.s."
+                    })
 
             if results_table:
                 res_df = pd.DataFrame(results_table)
