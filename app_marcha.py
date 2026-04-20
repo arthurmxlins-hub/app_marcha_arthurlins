@@ -1242,10 +1242,15 @@ if st.session_state.processadores:
                                 idxs = np.digitize(gamma, [0, 45, 135, 225, 315, 360])
                                 map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
                                 fatia = [map_labels[i] for i in idxs[inicio:fim]]
-                            
-                            if len(data_g1) > 2 and len(data_g2) > 2:
-                                _, p_norm1 = sp_stats.shapiro(data_g1)
-                                _, p_norm2 = sp_stats.shapiro(data_g2)
+			
+									if not np.isnan(val):
+			                            if p.grupo == grupos[0]: data_g1.append(val)
+			                            elif p.grupo == grupos[1]: data_g2.append(val)
+			                    except: continue
+			
+			                if len(data_g1) > 2 and len(data_g2) > 2:
+			                    _, p_norm1 = sp_stats.shapiro(data_g1)
+			                    _, p_norm2 = sp_stats.shapiro(data_g2)
                                 is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
                     
                                 _, p_lev = sp_stats.levene(data_g1, data_g2)
