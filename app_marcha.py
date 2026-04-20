@@ -1251,7 +1251,7 @@ if st.session_state.processadores:
                             elif p.grupo == grupos[1]: data_g2.append(val)
                     except: continue
 
-                                if is_normal:
+                        if is_normal:
                     if equal_var:
                         test_name = "Teste T (Normalidade e Homocedasticidade)"
                     else:
