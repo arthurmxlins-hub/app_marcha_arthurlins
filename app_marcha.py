@@ -69,22 +69,24 @@ class ProcessadorCinematico:
                             self.passo_norm['D'] = ((val_d / 1000.0) / altura_m) * 100.0
                         if not np.isnan(val_e) and val_e > 0:
                             self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0 
-            self.coord_vetorial = self._calcular_coordenacao_vetorial()  
-            self.indices_assimetria = {}
-            pares = [
-                ('Passo', self.passo_norm['D'], self.passo_norm['E']),
-                ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
-                ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
-            ]
-            
-            for nome, d, e in pares:
-                if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
-                    self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100
-                else:
-                    self.indices_assimetria[nome] = np.nan
-			self.valido = True
-        except Exception as e:
-            self.erro_msg = str(e)
+            self.coord_vetorial = self._calcular_coordenacao_vetorial()   
+			self.indices_assimetria = {}
+                pares = [
+                    ('Passo', self.passo_norm['D'], self.passo_norm['E']),
+                    ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
+                    ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
+                ]
+                
+                for nome, d, e in pares:
+                    if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
+                        self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100.0
+                    else:
+                        self.indices_assimetria[nome] = np.nan
+                
+                self.valido = True
+            except Exception as e:
+                self.erro_msg = str(e)
+                self.valido = False
             self.valido = False
             
     def _get(self, nome, f):
