@@ -34,7 +34,7 @@ class ProcessadorCinematico:
     def __init__(self, caminho_arquivo, nome_original, grupo="Geral", df_antropo=None):
         self.caminho = caminho_arquivo
         self.nome_arq = nome_original
-        self.grupo=grupo
+        self.grupo = grupo
         self.valido = False
         self.erro_msg = ""
 
@@ -53,40 +53,52 @@ class ProcessadorCinematico:
             self.fases_marcha = self._calcular_fases_marcha()
             self.foot_clearance = self._calcular_foot_clearance()
             self.comprimento_passo = self._calcular_comprimento_passo()
+
+            # --- NOVO: NORMALIZAÇÃO ANTROPOMÉTRICA BLINDADA E INTELIGENTE ---
             self.passo_norm = {'D': np.nan, 'E': np.nan}
             if df_antropo is not None:
                 nome_limpo = nome_original.lower().replace('.c3d', '')
-                id_paciente = nome_limpo.split('_')[0].upper().strip()                
-                match = df_antropo[df_antropo['ID'] == id_paciente]                
+                id_paciente = nome_limpo.split('_')[0].upper().strip()
+                
+                match = df_antropo[df_antropo['ID'] == id_paciente]
+                
                 if not match.empty:
-                    altura_m = float(match['ALTURA'].values[0])                    
+                    altura_m = float(match['ALTURA'].values[0])
+                    
+                    # Correção automática para centímetros
                     if altura_m > 3.0:
-                        altura_m = altura_m / 100.0                        
-                    if altura_m > 0:                        
+                        altura_m = altura_m / 100.0
+                        
+                    if altura_m > 0:
                         val_d = self.comprimento_passo.get('D', np.nan)
                         val_e = self.comprimento_passo.get('E', np.nan)
+                        
                         if not np.isnan(val_d) and val_d > 0:
                             self.passo_norm['D'] = ((val_d / 1000.0) / altura_m) * 100.0
                         if not np.isnan(val_e) and val_e > 0:
-                            self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0 
-            self.coord_vetorial = self._calcular_coordenacao_vetorial()   
-			self.indices_assimetria = {}
-                pares = [
-                    ('Passo', self.passo_norm['D'], self.passo_norm['E']),
-                    ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
-                    ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
-                ]
-                
-                for nome, d, e in pares:
-                    if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
-                        self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100.0
-                    else:
-                        self.indices_assimetria[nome] = np.nan
-                
-                self.valido = True
-            except Exception as e:
-                self.erro_msg = str(e)
-                self.valido = False
+                            self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0
+            # -----------------------------------------------------------------
+            
+            self.coord_vetorial = self._calcular_coordenacao_vetorial()
+
+            # --- NOVO: MOTOR DE ASSIMETRIA ---
+            self.indices_assimetria = {}
+            pares = [
+                ('Passo', self.passo_norm['D'], self.passo_norm['E']),
+                ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
+                ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
+            ]
+            
+            for nome, d, e in pares:
+                if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
+                    self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100.0
+                else:
+                    self.indices_assimetria[nome] = np.nan
+            # ---------------------------------
+
+            self.valido = True
+        except Exception as e:
+            self.erro_msg = str(e)
             self.valido = False
             
     def _get(self, nome, f):
