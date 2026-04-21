@@ -1179,7 +1179,11 @@ if st.session_state.processadores:
     # =========================================================================
     # TAB 6: ESTATÍSTICA INFERENCIAL (COM SEPARAÇÃO APOIO / BALANÇO)
     # =========================================================================
-    st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
+    # =========================================================================
+    # TAB 6: ESTATÍSTICA (INTRA E ENTRE GRUPOS)
+    # =========================================================================
+    with tab6:
+        st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
         
         # --- FLUXO DE PROCESSAMENTO ESTATÍSTICO ---
         with st.expander("🔍 Entenda o Fluxo de Decisão Estatística", expanded=True):
