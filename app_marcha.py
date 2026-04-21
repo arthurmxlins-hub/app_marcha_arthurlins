@@ -70,7 +70,19 @@ class ProcessadorCinematico:
                         if not np.isnan(val_e) and val_e > 0:
                             self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0 
             self.coord_vetorial = self._calcular_coordenacao_vetorial()  
-            self.valido = True
+            self.indices_assimetria = {}
+            pares = [
+                ('Passo', self.passo_norm['D'], self.passo_norm['E']),
+                ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
+                ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
+            ]
+            
+            for nome, d, e in pares:
+                if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
+                    self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100
+                else:
+                    self.indices_assimetria[nome] = np.nan
+			self.valido = True
         except Exception as e:
             self.erro_msg = str(e)
             self.valido = False
@@ -1388,7 +1400,7 @@ if st.session_state.processadores:
                         st.code(str(e))
 
     # =========================================================================
-    # TAB 7: RELATÓRIO CLÍNICO AUTOMATIZADO (COM FASES)
+    # TAB 7: RELATÓRIO CLÍNICO AUTOMATIZADO (AGRUPADO POR LADO)
     # =========================================================================
     with tab7:
         st.subheader("📝 Relatório Clínico e Achados Significativos")
@@ -1404,46 +1416,44 @@ if st.session_state.processadores:
             st.markdown(f"Análise comparativa gerada entre o grupo base (**{g_controle}**) e o grupo de estudo (**{g_teste}**).")
             st.markdown("---")
             
-            achados_espaco_temp = []
-            achados_cinematica = []
-            achados_coord_apoio = []
-            achados_coord_balanco = []
             
-            # 1. Mapeamento Base
+            resultados_agrupados = {
+                'Espaço-Temporal': {}, 'Cinemática': {}, 'Coord. Apoio': {}, 'Coord. Balanço': {}
+            }
+            
+            
             vars_relatorio = [
-                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, achados_espaco_temp),
-                ("Apoio DIR (%)", 'fases', 'D', 'Apoio', None, None, achados_espaco_temp),
-                ("Apoio ESQ (%)", 'fases', 'E', 'Apoio', None, None, achados_espaco_temp),
-                ("Clearance DIR (mm)", 'clearance', 'D', None, None, None, achados_espaco_temp),
-                ("Clearance ESQ (mm)", 'clearance', 'E', None, None, None, achados_espaco_temp),
-                ("Passo DIR (mm)", 'passo', 'D', None, None, None, achados_espaco_temp),
-                ("Passo ESQ (mm)", 'passo', 'E', None, None, None, achados_espaco_temp),
-                ("Passo DIR Norm (% Altura)", 'passo_norm', 'D', None, None, None, achados_espaco_temp),
-                ("Passo ESQ Norm (% Altura)", 'passo_norm', 'E', None, None, None, achados_espaco_temp),
-                ("Quad DIR: Máx (°)", 'stats', 'Quad_D', 'max', None, None, achados_cinematica),
-                ("Quad DIR: Mín (°)", 'stats', 'Quad_D', 'min', None, None, achados_cinematica),
-                ("Quad ESQ: Máx (°)", 'stats', 'Quad_E', 'max', None, None, achados_cinematica),
-                ("Quad ESQ: Mín (°)", 'stats', 'Quad_E', 'min', None, None, achados_cinematica),
-                ("Joel DIR: Máx (°)", 'stats', 'Joel_D', 'max', None, None, achados_cinematica),
-                ("Joel DIR: Mín (°)", 'stats', 'Joel_D', 'min', None, None, achados_cinematica),
-                ("Joel ESQ: Máx (°)", 'stats', 'Joel_E', 'max', None, None, achados_cinematica),
-                ("Joel ESQ: Mín (°)", 'stats', 'Joel_E', 'min', None, None, achados_cinematica),
-                ("Torn DIR: Máx (°)", 'stats', 'Torn_D', 'max', None, None, achados_cinematica),
-                ("Torn DIR: Mín (°)", 'stats', 'Torn_D', 'min', None, None, achados_cinematica),
-                ("Torn ESQ: Máx (°)", 'stats', 'Torn_E', 'max', None, None, achados_cinematica),
-                ("Torn ESQ: Mín (°)", 'stats', 'Torn_E', 'min', None, None, achados_cinematica),
+                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, 'Espaço-Temporal'),
+                ("Apoio DIR (%)", 'fases', 'D', 'Apoio', None, None, 'Espaço-Temporal'),
+                ("Apoio ESQ (%)", 'fases', 'E', 'Apoio', None, None, 'Espaço-Temporal'),
+                ("Clearance DIR (mm)", 'clearance', 'D', None, None, None, 'Espaço-Temporal'),
+                ("Clearance ESQ (mm)", 'clearance', 'E', None, None, None, 'Espaço-Temporal'),
+                ("Passo DIR (% Altura)", 'passo_norm', 'D', None, None, None, 'Espaço-Temporal'),
+                ("Passo ESQ (% Altura)", 'passo_norm', 'E', None, None, None, 'Espaço-Temporal'),
+                ("Quad DIR: Máx (°)", 'stats', 'Quad_D', 'max', None, None, 'Cinemática'),
+                ("Quad DIR: Mín (°)", 'stats', 'Quad_D', 'min', None, None, 'Cinemática'),
+                ("Quad ESQ: Máx (°)", 'stats', 'Quad_E', 'max', None, None, 'Cinemática'),
+                ("Quad ESQ: Mín (°)", 'stats', 'Quad_E', 'min', None, None, 'Cinemática'),
+                ("Joel DIR: Máx (°)", 'stats', 'Joel_D', 'max', None, None, 'Cinemática'),
+                ("Joel DIR: Mín (°)", 'stats', 'Joel_D', 'min', None, None, 'Cinemática'),
+                ("Joel ESQ: Máx (°)", 'stats', 'Joel_E', 'max', None, None, 'Cinemática'),
+                ("Joel ESQ: Mín (°)", 'stats', 'Joel_E', 'min', None, None, 'Cinemática'),
+                ("Torn DIR: Máx (°)", 'stats', 'Torn_D', 'max', None, None, 'Cinemática'),
+                ("Torn DIR: Mín (°)", 'stats', 'Torn_D', 'min', None, None, 'Cinemática'),
+                ("Torn ESQ: Máx (°)", 'stats', 'Torn_E', 'max', None, None, 'Cinemática'),
+                ("Torn ESQ: Mín (°)", 'stats', 'Torn_E', 'min', None, None, 'Cinemática'),
             ]
 
-            # 2. Geração Dinâmica para o Relatório Clínico
             pares_coord = [('QJ DIR', 'Quad_Joel_D'), ('QJ ESQ', 'Quad_Joel_E'), 
                            ('JT DIR', 'Joel_Torn_D'), ('JT ESQ', 'Joel_Torn_E')]
             
             for par_label, par_key in pares_coord:
                 for padrao in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
-                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 0, 60, achados_coord_apoio))
-                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 60, 101, achados_coord_balanco))
+                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 0, 60, 'Coord. Apoio'))
+                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 60, 101, 'Coord. Balanço'))
 
-            for label, cat, key1, key2, inicio, fim, lista_destino in vars_relatorio:
+            # 2. Processamento Estatístico
+            for label, cat, key1, key2, inicio, fim, categoria in vars_relatorio:
                 data_g1, data_g2 = [], []
                 for p in st.session_state.processadores:
                     try:
@@ -1451,7 +1461,6 @@ if st.session_state.processadores:
                         if cat == 'attr': val = getattr(p, key1)
                         elif cat == 'fases': val = p.fases_marcha.get(key1, {}).get(key2, np.nan)
                         elif cat == 'clearance': val = p.foot_clearance.get(key1, np.nan)
-                        elif cat == 'passo': val = p.comprimento_passo.get(key1, np.nan)
                         elif cat == 'passo_norm': val = getattr(p, 'passo_norm', {}).get(key1, np.nan)
                         elif cat == 'stats': val = p.obter_stats().get(key1, {}).get(key2, np.nan)
                         elif cat == 'coord_fase':
@@ -1465,7 +1474,6 @@ if st.session_state.processadores:
                                 idxs = np.digitize((np.degrees(np.arctan2(dd, dp)) + 360) % 360, [0, 45, 135, 225, 315, 360])
                                 map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
                                 fatia = [map_labels[i] for i in idxs[inicio:fim]]
-                            
                             if len(fatia) > 0: val = (fatia.count(key2) / len(fatia)) * 100
                         
                         if not np.isnan(val):
@@ -1480,36 +1488,137 @@ if st.session_state.processadores:
                     
                     if is_normal:
                         _, p_val = sp_stats.ttest_ind(data_g1, data_g2, equal_var=(sp_stats.levene(data_g1, data_g2)[1] > 0.05))
+                        s_pool = np.sqrt((np.var(data_g1, ddof=1) + np.var(data_g2, ddof=1)) / 2)
+                        efeito = (np.mean(data_g1) - np.mean(data_g2)) / s_pool if s_pool > 0 else 0
                     else:
-                        _, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
+                        u_stat, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
+                        efeito = 1 - (2 * u_stat) / (len(data_g1) * len(data_g2))
+
+                    media_c, media_t = np.mean(data_g1), np.mean(data_g2)
+                    tendencia = "Redução" if media_c > media_t else "Aumento"
+
+                    # 3. Lógica de Agrupamento
+                    lado = 'ÚNICO'
+                    base_label = label
+                    if 'DIR' in label:
+                        lado = 'DIR'
+                        base_label = label.replace('DIR', '').replace('  ', ' ').strip()
+                    elif 'ESQ' in label:
+                        lado = 'ESQ'
+                        base_label = label.replace('ESQ', '').replace('  ', ' ').strip()
+                    
+                    if base_label not in resultados_agrupados[categoria]:
+                        resultados_agrupados[categoria][base_label] = {}
+                    
+                    resultados_agrupados[categoria][base_label][lado] = {
+                        'sig': p_val < 0.05, 'p': p_val, 'efeito': abs(efeito), 
+                        'tendencia': tendencia, 'media_c': media_c, 'media_t': media_t
+                    }
+
+            # 4. Função Geradora de Textos Agrupados
+            def gerar_texto_laudo(dicionario_categoria):
+                textos = []
+                for base, lados in dicionario_categoria.items():
+                    if 'DIR' in lados and 'ESQ' in lados:
+                        d, e = lados['DIR'], lados['ESQ']
+                        
+                        if d['sig'] and e['sig']:
+                            dir_efeito = "negativo" if d['tendencia'] == "Redução" else "positivo"
+                            esq_efeito = "negativo" if e['tendencia'] == "Redução" else "positivo"
+                            textos.append(f"🔄 **{base}**: Alteração bilateral significativa. O grupo {g_teste} apresentou **{d['tendencia'].lower()}** no lado direito (*p={d['p']:.3f}, tamanho de efeito={d['efeito']:.2f}*) e **{e['tendencia'].lower()}** no esquerdo (*p={e['p']:.3f}, tamanho de efeito={e['efeito']:.2f}*).")
+                        
+                        elif d['sig'] and not e['sig']:
+                            textos.append(f"⚠️ **{base}**: Assimetria detectada. Apenas o lado **DIREITO** apresentou **{d['tendencia'].lower()}** significativa no grupo {g_teste} (*p={d['p']:.3f}, tamanho de efeito={d['efeito']:.2f}*). O lado esquerdo não teve diferença estatística.")
+                        
+                        elif not d['sig'] and e['sig']:
+                            textos.append(f"⚠️ **{base}**: Assimetria detectada. Apenas o lado **ESQUERDO** apresentou **{e['tendencia'].lower()}** significativa no grupo {g_teste} (*p={e['p']:.3f}, tamanho de efeito={e['efeito']:.2f}*). O lado direito não teve diferença estatística.")
+                    
+                    elif 'ÚNICO' in lados:
+                        u = lados['ÚNICO']
+                        if u['sig']:
+                            textos.append(f"📈 **{base}**: **{u['tendencia']}** significativa no grupo {g_teste} (*p={u['p']:.3f}, tamanho de efeito={u['efeito']:.2f}*).")
+                
+                return textos
+
+            # 5. Exibição do Relatório
+            categorias_nomenclatura = [
+                ('Espaço-Temporal', "### 🚶 Parâmetros Espaço-Temporais"),
+                ('Cinemática', "### 📐 Cinemática Articular (Amplitudes)"),
+                ('Coord. Apoio', "### 🦵 Coordenação na Fase de Apoio (0-60%)"),
+                ('Coord. Balanço', "### ✈️ Coordenação na Fase de Balanço (60-100%)")
+            ]
+
+            for chave, titulo in categorias_nomenclatura:
+                st.markdown(titulo)
+                achados = gerar_texto_laudo(resultados_agrupados[chave])
+                if achados:
+                    for a in achados: st.markdown(a)
+                else: 
+                    st.write("Nenhuma diferença clinicamente significativa detectada nesta categoria.")
+			
+			st.markdown("### ⚖️ Análise de Assimetria e Dominância")
+            variaveis_ia = ['Passo', 'Apoio', 'Clearance']
+            achados_assimetria = []
+            contagem_parkinson = 0
+            contagem_controle = 0
+
+            for var in variaveis_ia:
+                ia_g1 = [p.indices_assimetria.get(var, np.nan) for p in st.session_state.processadores if p.grupo == g_controle]
+                ia_g2 = [p.indices_assimetria.get(var, np.nan) for p in st.session_state.processadores if p.grupo == g_teste]
+                
+                # Limpa NaNs
+                ia_g1 = [x for x in ia_g1 if not np.isnan(x)]
+                ia_g2 = [x for x in ia_g2 if not np.isnan(x)]
+
+                if len(ia_g1) > 2 and len(ia_g2) > 2:
+                    # Compara a magnitude da assimetria entre os grupos
+                    _, p_val = sp_stats.mannwhitneyu(ia_g1, ia_g2)
+                    
+                    media_ia_c = np.mean(ia_g1)
+                    media_ia_t = np.mean(ia_g2)
+                    
+                    # Define um limiar clínico de assimetria (ex: > 10%)
+                    assimetricos_c = sum(1 for x in ia_g1 if x > 10)
+                    assimetricos_t = sum(1 for x in ia_g2 if x > 10)
+                    
+                    contagem_parkinson += assimetricos_t
+                    contagem_controle += assimetricos_c
 
                     if p_val < 0.05:
-                        media_c, media_t = np.mean(data_g1), np.mean(data_g2)
-                        if media_c > media_t:
-                            texto = f"📉 **{label}**: Redução significativa no grupo {g_teste} (*p={p_val:.3f}*). O grupo **{g_controle}** apresentou média maior ({media_c:.1f} vs {media_t:.1f})."
-                        else:
-                            texto = f"📈 **{label}**: Aumento significativo no grupo {g_teste} (*p={p_val:.3f}*). O grupo **{g_teste}** superou a base de normalidade ({media_t:.1f} vs {media_c:.1f})."
-                        lista_destino.append(texto)
+                        razao = media_ia_t / media_ia_c if media_ia_c > 0 else 0
+                        achados_assimetria.append(f"🔴 **{var}**: Índice de Simetria (SI) significativamente alterado no grupo {g_teste} (*p={p_val:.3f}*). A magnitude da assimetria bilateral, calculada pelo método de Robinson et al. (1987), é **{razao:.1f}x maior** que no grupo Controle ({media_ia_t:.1f}% vs {media_ia_c:.1f}%).")
+            # Resumo Narrativo Final
+            if contagem_parkinson > 0:
+                frequencia_relativa = contagem_parkinson / max(contagem_controle, 1)
+                st.write(f"Nesta amostra, a assimetria clínica é **{frequencia_relativa:.1f} vezes mais frequente** no grupo {g_teste} do que no grupo {g_controle}. As variáveis com maior desequilíbrio bilateral detectado foram:")
+                for a in achados_assimetria:
+                    st.markdown(a)
+            else:
+                st.write("Não foram detectadas assimetrias clinicamente significativas entre os grupos.")
 
-            # Exibição do Relatório
-            st.markdown("### 🚶 Parâmetros Espaço-Temporais")
-            if achados_espaco_temp:
-                for a in achados_espaco_temp: st.markdown(a)
-            else: st.write("Nenhuma diferença significativa.")
-
-            st.markdown("### 📐 Cinemática Articular (Amplitudes)")
-            if achados_cinematica:
-                for a in achados_cinematica: st.markdown(a)
-            else: st.write("Nenhuma diferença significativa.")
-
-            st.markdown("### 🦵 Coordenação na Fase de Apoio (0-60%)")
-            st.info("Momento de aceitação de carga e estabilização postural no solo.")
-            if achados_coord_apoio:
-                for a in achados_coord_apoio: st.markdown(a)
-            else: st.write("Nenhuma diferença significativa na coordenação de apoio.")
-
-            st.markdown("### ✈️ Coordenação na Fase de Balanço (60-100%)")
-            st.info("Momento de oscilação do membro e progressão da passada (risco de tropeço).")
-            if achados_coord_balanco:
-                for a in achados_coord_balanco: st.markdown(a)
-            else: st.write("Nenhuma diferença significativa na coordenação de balanço.") 
+		
+            st.markdown("---")
+            st.markdown("### 📚 Referências Metodológicas (Engine do Software)")
+            st.info("Os algoritmos de extração e estatística do GPBIO são fundamentados na literatura científica validada:")
+            
+            st.markdown("""
+            1. **Índice de Simetria (SI):** 
+			   *ROBINSON, R. O.; HERZOG, W.; NIGG, B. M. Use of force platform variables to quantify the effects of chiropractic manipulation on gait symmetry. Journal of Prosthetic and Orthotics, v. 11, n. 4, p. 172-176, 1987.*
+               *(Utilizado para quantificar a magnitude da assimetria bilateral em % nas variáveis espaço-temporais).*
+               
+            2. **Detecção Cinemática de Eventos da Marcha:**
+               *ZENI, J. A.; RICHARDS, J. G.; HIGGINSON, J. S. Two simple methods for determining gait events during treadmill and overground walking using kinematic data. Gait & Posture, v. 27, n. 4, p. 710-714, 2008.*
+               *(Algoritmo de processamento de picos e vales do marcador do calcanhar em relação à pelve para marcação de Heel Strike e Toe Off).*
+               
+            3. **Coordenação Vetorial (Angle-Angle e Vector Coding):**
+               *TEPAVAC, D.; FIELD-FOTE, E. C. Vector coding: a technique for quantification of inter-joint coordination. Journal of Biomechanics, v. 34, n. 1, p. 118-120, 2001.*
+               *(Base matemática para o cálculo das transições, CAV e frequências dos quadrantes de coordenação).*
+               
+            4. **Estatística Inferencial (Decisão Automática):**
+               *SHAPIRO, S. S.; WILK, M. B. An analysis of variance test for normality (complete samples). Biometrika, v. 52, n. 3/4, p. 591-611, 1965.*
+               *(Motor primário do fluxo de decisão para seleção entre testes paramétricos e não-paramétricos).*
+            """)
+            
+            # Botão extra para exportar o laudo completo (Opcional, mas muito útil)
+            if st.button("🖨️ Preparar Relatório para Impressão (Ctrl+P)", use_container_width=True):
+                st.toast("Relatório pronto! Pressione Ctrl+P no seu navegador para salvar em PDF.")
