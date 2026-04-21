@@ -1179,20 +1179,24 @@ if st.session_state.processadores:
     # =========================================================================
     # TAB 6: ESTATÍSTICA INFERENCIAL (COM SEPARAÇÃO APOIO / BALANÇO)
     # =========================================================================
-    with tab6:
-        st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
-                # --- FLUXO DE PROCESSAMENTO ESTATÍSTICO ---
+    st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
+        
+        # --- FLUXO DE PROCESSAMENTO ESTATÍSTICO ---
         with st.expander("🔍 Entenda o Fluxo de Decisão Estatística", expanded=True):
             st.markdown("""
-            O sistema segue este protocolo para garantir a validade das comparações entre grupos:
-            1.  **Teste de Normalidade (Shapiro-Wilk):** * Se *p > 0.05* em ambos os grupos: A distribuição é considerada **Normal**.
-                * Se *p < 0.05* em qualquer grupo: A distribuição é **Não Normal**.
-            2.  **Teste de Homocedasticidade (Levene):**
-                * Avalia se as variâncias dos grupos são iguais (Homogêneas).
-            3.  **Escolha do Teste de Hipótese:**
-                * **Normal + Variâncias Iguais:** Teste T de Student (Paramétrico).
-                * **Normal + Variâncias Diferentes:** Teste T de Welch (Paramétrico).
-                * **Não Normal:** Teste de Mann-Whitney U (Não Paramétrico).
+            O sistema avalia os dados em **Duas Frentes**:
+            
+            **A) Intra-grupo (Assimetria Direita vs Esquerda):**
+            * Verifica a normalidade dos lados D e E.
+            * Distribuição Normal: **Teste T Pareado**.
+            * Distribuição Não Normal: **Teste de Wilcoxon**.
+            
+            **B) Entre-grupos (Performance Média Bilateral):**
+            * **Teste de Normalidade (Shapiro-Wilk):** *p > 0.05* indica distribuição Normal.
+            * **Teste de Homocedasticidade (Levene):** Avalia se as variâncias são iguais.
+            * Normal + Variâncias Iguais: **Teste T de Student**.
+            * Normal + Variâncias Diferentes: **Teste T de Welch**.
+            * Não Normal: **Teste de Mann-Whitney U**.
             """)
 
         grupos = sorted(list(set([p.grupo for p in st.session_state.processadores])))
@@ -1202,219 +1206,157 @@ if st.session_state.processadores:
         else:
             st.info(f"Comparando: **{grupos[0]}** vs **{grupos[1]}**. Nível de significância: **α = 0.05**")
             
-            # 1. Variáveis Base (Espaço-temporais e Cinemáticas)
-            vars_estudo = [
-                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None),
-                ("Apoio DIR (%)", 'fases', 'D', 'Apoio', None, None),
-                ("Apoio ESQ (%)", 'fases', 'E', 'Apoio', None, None),
-                ("Clearance DIR (mm)", 'clearance', 'D', None, None, None),
-                ("Clearance ESQ (mm)", 'clearance', 'E', None, None, None),
-                ("Passo DIR (mm)", 'passo', 'D', None, None, None),
-                ("Passo ESQ (mm)", 'passo', 'E', None, None, None),
-                ("Passo DIR Norm (% Altura)", 'passo_norm', 'D', None, None, None),
-                ("Passo ESQ Norm (% Altura)", 'passo_norm', 'E', None, None, None),
-                ("Quad DIR: Máx (°)", 'stats', 'Quad_D', 'max', None, None),
-                ("Quad DIR: Mín (°)", 'stats', 'Quad_D', 'min', None, None),
-                ("Quad ESQ: Máx (°)", 'stats', 'Quad_E', 'max', None, None),
-                ("Quad ESQ: Mín (°)", 'stats', 'Quad_E', 'min', None, None),
-                ("Joel DIR: Máx (°)", 'stats', 'Joel_D', 'max', None, None),
-                ("Joel DIR: Mín (°)", 'stats', 'Joel_D', 'min', None, None),
-                ("Joel ESQ: Máx (°)", 'stats', 'Joel_E', 'max', None, None),
-                ("Joel ESQ: Mín (°)", 'stats', 'Joel_E', 'min', None, None),
-                ("Torn DIR: Máx (°)", 'stats', 'Torn_D', 'max', None, None),
-                ("Torn DIR: Mín (°)", 'stats', 'Torn_D', 'min', None, None),
-                ("Torn ESQ: Máx (°)", 'stats', 'Torn_E', 'max', None, None),
-                ("Torn ESQ: Mín (°)", 'stats', 'Torn_E', 'min', None, None),
+            # 1. Variáveis Base (Agrupadas para rodar os lados D e E automaticamente)
+            vars_base = [
+                # Label, Categoria, Key Base, Key Secundária, Início, Fim, É Bilateral?
+                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, False),
+                ("Apoio (%)", 'fases', None, 'Apoio', None, None, True),
+                ("Clearance (mm)", 'clearance', None, None, None, None, True),
+                ("Passo (mm)", 'passo', None, None, None, None, True),
+                ("Passo Norm (% Altura)", 'passo_norm', None, None, None, None, True),
+                ("Quad Máx (°)", 'stats', 'Quad', 'max', None, None, True),
+                ("Quad Mín (°)", 'stats', 'Quad', 'min', None, None, True),
+                ("Joel Máx (°)", 'stats', 'Joel', 'max', None, None, True),
+                ("Joel Mín (°)", 'stats', 'Joel', 'min', None, None, True),
+                ("Torn Máx (°)", 'stats', 'Torn', 'max', None, None, True),
+                ("Torn Mín (°)", 'stats', 'Torn', 'min', None, None, True),
             ]
 
-            # 2. Geração Dinâmica das Variáveis de Coordenação por FASE
-            pares_coord = [('QJ DIR', 'Quad_Joel_D'), ('QJ ESQ', 'Quad_Joel_E'), 
-                           ('JT DIR', 'Joel_Torn_D'), ('JT ESQ', 'Joel_Torn_E')]
+            # 2. Geração Dinâmica das Variáveis de Coordenação por FASE (Bilateral)
+            pares_coord_base = [('QJ', 'Quad_Joel'), ('JT', 'Joel_Torn')]
             padroes_coord = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
             
-            for par_label, par_key in pares_coord:
+            for par_label, par_key in pares_coord_base:
                 for padrao in padroes_coord:
-                    # Fase de Apoio (0 a 60)
-                    vars_estudo.append((f"APOIO {par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60))
-                    # Fase de Balanço (60 a 101)
-                    vars_estudo.append((f"BALANÇO {par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101))
+                    vars_base.append((f"APOIO {par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True))
+                    vars_base.append((f"BALANÇO {par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101, True))
 
-            results_table = []
+            resultados_intra = []
+            resultados_entre = []
 
-            for label, cat, key1, key2, inicio, fim in vars_estudo:
-                data_g1, data_g2 = [], []
+            # 3. Motor de Extração e Estatística
+            for label, cat, key1_base, key2, inicio, fim, is_bilateral in vars_base:
+                dados_g1 = {'D': [], 'E': [], 'M': [], 'Unico': []}
+                dados_g2 = {'D': [], 'E': [], 'M': [], 'Unico': []}
                 
                 for p in st.session_state.processadores:
                     try:
-                        val = np.nan
-                        if cat == 'attr': val = getattr(p, key1)
-                        elif cat == 'fases': val = p.fases_marcha.get(key1, {}).get(key2, np.nan)
-                        elif cat == 'clearance': val = p.foot_clearance.get(key1, np.nan)
-                        elif cat == 'passo': val = p.comprimento_passo.get(key1, np.nan)
-                        elif cat == 'passo_norm': val = getattr(p, 'passo_norm', {}).get(key1, np.nan)
-                        elif cat == 'stats':
-                            s = p.obter_stats() or {}
-                            val = s.get(key1, {}).get(key2, np.nan)
-                        elif cat == 'coord_fase':
-                            if hasattr(p, 'coord_vetorial_series') and key1 in p.coord_vetorial_series:
-                                fatia = p.coord_vetorial_series[key1][inicio:fim]
-                            else:
-                                prox_name, dist_name, lado = key1.split('_')[0], key1.split('_')[1], key1.split('_')[2]
-                                ciclo_p = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{prox_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
-                                ciclo_d = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{dist_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
-                                dp, dd = np.diff(ciclo_p), np.diff(ciclo_d)
-                                gamma = (np.degrees(np.arctan2(dd, dp)) + 360) % 360
-                                idxs = np.digitize(gamma, [0, 45, 135, 225, 315, 360])
-                                map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
-                                fatia = [map_labels[i] for i in idxs[inicio:fim]]
-                            
-                            if len(fatia) > 0:
-                                val = (fatia.count(key2) / len(fatia)) * 100
+                        target = dados_g1 if p.grupo == grupos[0] else dados_g2
                         
-                        if not np.isnan(val):
-                            if p.grupo == grupos[0]: data_g1.append(val)
-                            elif p.grupo == grupos[1]: data_g2.append(val)
+                        if not is_bilateral:
+                            val = getattr(p, key1_base, np.nan) if cat == 'attr' else np.nan
+                            if not np.isnan(val): target['Unico'].append(val)
+                        else:
+                            vd, ve = np.nan, np.nan
+                            for lado in ['D', 'E']:
+                                v = np.nan
+                                k1 = f"{key1_base}_{lado}" if key1_base and cat in ['stats', 'coord_fase'] else key1_base
+                                
+                                if cat == 'fases': v = p.fases_marcha.get(lado, {}).get(key2, np.nan)
+                                elif cat == 'clearance': v = p.foot_clearance.get(lado, np.nan)
+                                elif cat == 'passo': v = p.comprimento_passo.get(lado, np.nan)
+                                elif cat == 'passo_norm': v = getattr(p, 'passo_norm', {}).get(lado, np.nan)
+                                elif cat == 'stats':
+                                    s = p.obter_stats() or {}
+                                    v = s.get(k1, {}).get(key2, np.nan)
+                                elif cat == 'coord_fase':
+                                    if hasattr(p, 'coord_vetorial_series') and k1 in p.coord_vetorial_series:
+                                        fatia = p.coord_vetorial_series[k1][inicio:fim]
+                                    else:
+                                        prox_name, dist_name = key1_base.split('_')[0], key1_base.split('_')[1]
+                                        ciclo_p = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{prox_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
+                                        ciclo_d = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{dist_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
+                                        dp, dd = np.diff(ciclo_p), np.diff(ciclo_d)
+                                        gamma = (np.degrees(np.arctan2(dd, dp)) + 360) % 360
+                                        idxs = np.digitize(gamma, [0, 45, 135, 225, 315, 360])
+                                        map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
+                                        fatia = [map_labels[i] for i in idxs[inicio:fim]]
+                                    if len(fatia) > 0: v = (fatia.count(key2) / len(fatia)) * 100
+
+                                if lado == 'D': vd = v
+                                else: ve = v
+                            
+                            if not np.isnan(vd) and not np.isnan(ve):
+                                target['D'].append(vd)
+                                target['E'].append(ve)
+                                target['M'].append((vd + ve) / 2)
                     except:
                         continue
 
-                if len(data_g1) > 2 and len(data_g2) > 2:
-                    _, p_norm1 = sp_stats.shapiro(data_g1)
-                    _, p_norm2 = sp_stats.shapiro(data_g2)
-                    is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
-                    
-                    _, p_lev = sp_stats.levene(data_g1, data_g2)
-                    equal_var = (p_lev > 0.05)
+                # --- FRENTE A: INTRA-GRUPO (Assimetria) ---
+                if is_bilateral:
+                    for g_idx, d_grp in enumerate([dados_g1, dados_g2]):
+                        if len(d_grp['D']) > 2 and len(d_grp['E']) > 2:
+                            try:
+                                _, p_nd = sp_stats.shapiro(d_grp['D'])
+                                _, p_ne = sp_stats.shapiro(d_grp['E'])
+                                if p_nd > 0.05 and p_ne > 0.05:
+                                    _, p_intra = sp_stats.ttest_rel(d_grp['D'], d_grp['E'])
+                                    teste_usado = "T Pareado"
+                                else:
+                                    _, p_intra = sp_stats.wilcoxon(d_grp['D'], d_grp['E'])
+                                    teste_usado = "Wilcoxon"
 
-                    if is_normal:
-                        if equal_var:
-                            test_name = "Teste T (Normalidade e Homocedasticidade)"
-                        else:
-                            test_name = "Teste T - Welch (Normalidade e Heterocedasticidade)"
-                        
-                        _, p_val = sp_stats.ttest_ind(data_g1, data_g2, equal_var=equal_var)
-                        
-                        # Cálculo do Tamanho do Efeito (Cohen's d)
-                        s_pooled = np.sqrt((np.var(data_g1, ddof=1) + np.var(data_g2, ddof=1)) / 2)
-                        effect_size = (np.mean(data_g1) - np.mean(data_g2)) / s_pooled if s_pooled > 0 else 0
-                    else:
-                        test_name = "Mann-Whitney (Não Paramétrico - Distribuição Não Normal)"
-                        u_stat, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
-                        
-                        # Cálculo do Tamanho do Efeito (r de Rosenthal)
-                        effect_size = 1 - (2 * u_stat) / (len(data_g1) * len(data_g2))
+                                resultados_intra.append({
+                                    "Grupo": grupos[g_idx], "Variável": label, "Teste": teste_usado,
+                                    "Lado DIR (M)": f"{np.mean(d_grp['D']):.2f}", "Lado ESQ (M)": f"{np.mean(d_grp['E']):.2f}",
+                                    "P-Value": f"{p_intra:.4f}", "Assimetria": "⚠️ SIM" if p_intra < 0.05 else "NÃO"
+                                })
+                            except: continue
 
-                    results_table.append({
-                        "Variável": label, "Teste": test_name,
-                        "Normalidade (p)": f"{min(p_norm1, p_norm2):.3f}",
-                        "P-Value": f"{p_val:.4f}", "Efeito": f"{abs(effect_size):.2f}",
-                        "Resultado": "✅ SIGNIFICANTE" if p_val < 0.05 else "❌ n.s."
-                    })
+                # --- FRENTE B: ENTRE-GRUPOS (Performance Bilateral) ---
+                arr_g1 = dados_g1['M'] if is_bilateral else dados_g1['Unico']
+                arr_g2 = dados_g2['M'] if is_bilateral else dados_g2['Unico']
 
-            if results_table:
-                res_df = pd.DataFrame(results_table)
-                def highlight_sig(val):
-                    return 'background-color: #d4edda;' if 'SIGNIFICANTE' in str(val) else ''
-
-                st.dataframe(res_df.style.map(highlight_sig, subset=['Resultado']), use_container_width=True, height=600)
-                csv_stat = res_df.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-                st.download_button("📥 Baixar Tabela Estatística para SPSS (CSV)", data=csv_stat, file_name="estatistica_faseada.csv", mime="text/csv")
-				# ==========================================
-                # EXPORTAÇÃO DA MATRIZ BRUTA PARA O SPSS
-                # ==========================================
-                st.markdown("---")
-                st.markdown("#### 📤 Exportação para SPSS (Matriz de Dados Brutos)")
-                st.info("Matriz bruta de dados para SPSS.")
-                
-                matriz_spss = []
-                for p in st.session_state.processadores:
-                    linha = {
-                        "Arquivo": p.nome_arq,
-                        "Grupo": p.grupo
-                    }
-                    
-                    
-                    for label, cat, key1, key2, inicio, fim in vars_estudo:
-                        try:
-                            val = np.nan
-                            if cat == 'attr': val = getattr(p, key1)
-                            elif cat == 'fases': val = p.fases_marcha.get(key1, {}).get(key2, np.nan)
-                            elif cat == 'clearance': val = p.foot_clearance.get(key1, np.nan)
-                            elif cat == 'passo': val = p.comprimento_passo.get(key1, np.nan)
-                            elif cat == 'passo_norm': val = getattr(p, 'passo_norm', {}).get(key1, np.nan)
-                            elif cat == 'stats': val = p.obter_stats().get(key1, {}).get(key2, np.nan)
-                            elif cat == 'coord_fase':
-                                if hasattr(p, 'coord_vetorial_series') and key1 in p.coord_vetorial_series:
-                                    fatia = p.coord_vetorial_series[key1][inicio:fim]
-                                    if len(fatia) > 0: val = (fatia.count(key2) / len(fatia)) * 100
-                            
-                            linha[label] = round(val, 4) if not np.isnan(val) else ""
-                        except:
-                            linha[label] = ""
-                            
-                    matriz_spss.append(linha)
-                
-                df_spss = pd.DataFrame(matriz_spss)
-                csv_spss = df_spss.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-                
-                st.download_button(
-                    label="📊 Baixar Matriz Bruta de Pacientes (Pronta para SPSS)", 
-                    data=csv_spss, 
-                    file_name="matriz_spss_gpbio.csv",
-                    mime="text/csv",
-                    type="primary"
-                )
-		
-				# ==========================================
-                # CÁLCULO NATIVO DA MANOVA 
-                # ==========================================
-                st.markdown("---")
-                st.markdown("### 🧠 MANOVA Nativa (Statsmodels)")
-                st.info("Cálculo multivariado independente. Evita a necessidade de exportação para softwares externos.")
-                
-                df_manova = pd.DataFrame(matriz_spss)
-                
-                
-                import re
-                df_manova.columns = [re.sub(r'\W+', '_', col).strip('_') for col in df_manova.columns]
-                
-                
-                pares_teste = ['QJ_DIR', 'QJ_ESQ', 'JT_DIR', 'JT_ESQ']
-
-                if st.button("🚀 Rodar MANOVA (Por Par Articular)", type="primary", use_container_width=True):
+                if len(arr_g1) > 2 and len(arr_g2) > 2:
                     try:
-                        # --- FASE DE APOIO ---
-                        st.markdown("#### 🦵 Resultados Multivariados: Fase de Apoio")
-                        for par in pares_teste:
-                           
-                            vars_par = [c for c in df_manova.columns if 'APOIO' in c and par in c and 'AntiFase' not in c]
+                        _, p_norm1 = sp_stats.shapiro(arr_g1)
+                        _, p_norm2 = sp_stats.shapiro(arr_g2)
+                        is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
+                        
+                        _, p_lev = sp_stats.levene(arr_g1, arr_g2)
+                        equal_var = (p_lev > 0.05)
+
+                        if is_normal:
+                            test_name = "Teste T" if equal_var else "Teste T (Welch)"
+                            _, p_entre = sp_stats.ttest_ind(arr_g1, arr_g2, equal_var=equal_var)
                             
-                            if len(vars_par) > 0:
-                                formula = f"{' + '.join(vars_par)} ~ Grupo"
-                                manova_res = MANOVA.from_formula(formula, data=df_manova).mv_test()
-                                st.markdown(f"**Teste Específico: {par.replace('_', ' ')}**")
-                                st.text(manova_res.summary())
-                        
-                        st.markdown("---")
-                        
-                        # --- FASE DE BALANÇO ---
-                        st.markdown("#### ✈️ Resultados Multivariados: Fase de Balanço")
-                        for par in pares_teste:
-                            vars_par = [c for c in df_manova.columns if ('BALANÇO' in c or 'BALANCO' in c) and par in c and 'AntiFase' not in c]
-                            
-                            if len(vars_par) > 0:
-                                formula = f"{' + '.join(vars_par)} ~ Grupo"
-                                manova_res = MANOVA.from_formula(formula, data=df_manova).mv_test()
-                                st.markdown(f"**Teste Específico: {par.replace('_', ' ')}**")
-                                st.text(manova_res.summary())
-                                
-                        st.success("Cálculos concluídos! Modelos rodados de forma segmentada para proteger contra o erro de Matriz Singular em amostras pequenas.")
-                        
-                    except Exception as e:
-                        st.error("Erro matemático. Verifique se importou arquivos suficientes ou se os grupos estão corretos.")
-                        st.code(str(e))
+                            s_pooled = np.sqrt((np.var(arr_g1, ddof=1) + np.var(arr_g2, ddof=1)) / 2)
+                            effect_size = (np.mean(arr_g1) - np.mean(arr_g2)) / s_pooled if s_pooled > 0 else 0
+                        else:
+                            test_name = "Mann-Whitney"
+                            u_stat, p_entre = sp_stats.mannwhitneyu(arr_g1, arr_g2, alternative='two-sided')
+                            effect_size = 1 - (2 * u_stat) / (len(arr_g1) * len(arr_g2))
+
+                        resultados_entre.append({
+                            "Variável": label, "Teste": test_name,
+                            "Normalidade (p)": f"{min(p_norm1, p_norm2):.3f}",
+                            f"Média {grupos[0]}": f"{np.mean(arr_g1):.2f}", f"Média {grupos[1]}": f"{np.mean(arr_g2):.2f}",
+                            "P-Value": f"{p_entre:.4f}", "Efeito": f"{abs(effect_size):.2f}",
+                            "Resultado": "✅ SIGNIFICANTE" if p_entre < 0.05 else "❌ n.s."
+                        })
+                    except: continue
+
+            # 4. Renderização das Tabelas com Highlighting
+            def highlight_sig(val):
+                return 'background-color: #d4edda;' if 'SIGNIFICANTE' in str(val) or 'SIM' in str(val) else ''
+
+            st.markdown("### 1. Comparação Intra-grupo (Assimetria Bilateral)")
+            if resultados_intra:
+                df_intra = pd.DataFrame(resultados_intra)
+                st.dataframe(df_intra.style.map(highlight_sig, subset=['Assimetria']), use_container_width=True)
+                csv_intra = df_intra.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                st.download_button("📥 Baixar Tabela Intra-grupo (CSV)", data=csv_intra, file_name="estatistica_intra.csv", mime="text/csv")
+
+            st.markdown("### 2. Comparação Entre-grupos (Performance Global)")
+            if resultados_entre:
+                df_entre = pd.DataFrame(resultados_entre)
+                st.dataframe(df_entre.style.map(highlight_sig, subset=['Resultado']), use_container_width=True)
+                csv_entre = df_entre.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                st.download_button("📥 Baixar Tabela Entre-grupos (CSV)", data=csv_entre, file_name="estatistica_entre.csv", mime="text/csv")
 
     # =========================================================================
-    # TAB 7: RELATÓRIO CLÍNICO AUTOMATIZADO (AGRUPADO POR LADO)
+    # TAB 7: RELATÓRIO CLÍNICO AUTOMATIZADO (INTRA E ENTRE GRUPOS)
     # =========================================================================
     with tab7:
         st.subheader("📝 Relatório Clínico e Achados Significativos")
@@ -1430,131 +1372,138 @@ if st.session_state.processadores:
             st.markdown(f"Análise comparativa gerada entre o grupo base (**{g_controle}**) e o grupo de estudo (**{g_teste}**).")
             st.markdown("---")
             
-            
+            # 1. Configuração de Variáveis e Categorias
             resultados_agrupados = {
-                'Espaço-Temporal': {}, 'Cinemática': {}, 'Coord. Apoio': {}, 'Coord. Balanço': {}
+                'Espaço-Temporal': [], 'Cinemática': [], 'Coord. Apoio': [], 'Coord. Balanço': []
             }
             
-            
-            vars_relatorio = [
-                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, 'Espaço-Temporal'),
-                ("Apoio DIR (%)", 'fases', 'D', 'Apoio', None, None, 'Espaço-Temporal'),
-                ("Apoio ESQ (%)", 'fases', 'E', 'Apoio', None, None, 'Espaço-Temporal'),
-                ("Clearance DIR (mm)", 'clearance', 'D', None, None, None, 'Espaço-Temporal'),
-                ("Clearance ESQ (mm)", 'clearance', 'E', None, None, None, 'Espaço-Temporal'),
-                ("Passo DIR (% Altura)", 'passo_norm', 'D', None, None, None, 'Espaço-Temporal'),
-                ("Passo ESQ (% Altura)", 'passo_norm', 'E', None, None, None, 'Espaço-Temporal'),
-                ("Quad DIR: Máx (°)", 'stats', 'Quad_D', 'max', None, None, 'Cinemática'),
-                ("Quad DIR: Mín (°)", 'stats', 'Quad_D', 'min', None, None, 'Cinemática'),
-                ("Quad ESQ: Máx (°)", 'stats', 'Quad_E', 'max', None, None, 'Cinemática'),
-                ("Quad ESQ: Mín (°)", 'stats', 'Quad_E', 'min', None, None, 'Cinemática'),
-                ("Joel DIR: Máx (°)", 'stats', 'Joel_D', 'max', None, None, 'Cinemática'),
-                ("Joel DIR: Mín (°)", 'stats', 'Joel_D', 'min', None, None, 'Cinemática'),
-                ("Joel ESQ: Máx (°)", 'stats', 'Joel_E', 'max', None, None, 'Cinemática'),
-                ("Joel ESQ: Mín (°)", 'stats', 'Joel_E', 'min', None, None, 'Cinemática'),
-                ("Torn DIR: Máx (°)", 'stats', 'Torn_D', 'max', None, None, 'Cinemática'),
-                ("Torn DIR: Mín (°)", 'stats', 'Torn_D', 'min', None, None, 'Cinemática'),
-                ("Torn ESQ: Máx (°)", 'stats', 'Torn_E', 'max', None, None, 'Cinemática'),
-                ("Torn ESQ: Mín (°)", 'stats', 'Torn_E', 'min', None, None, 'Cinemática'),
+            vars_base_relatorio = [
+                ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, False, 'Espaço-Temporal'),
+                ("Apoio (%)", 'fases', None, 'Apoio', None, None, True, 'Espaço-Temporal'),
+                ("Clearance (mm)", 'clearance', None, None, None, None, True, 'Espaço-Temporal'),
+                ("Passo (% Altura)", 'passo_norm', None, None, None, None, True, 'Espaço-Temporal'),
+                ("Quad Máx (°)", 'stats', 'Quad', 'max', None, None, True, 'Cinemática'),
+                ("Quad Mín (°)", 'stats', 'Quad', 'min', None, None, True, 'Cinemática'),
+                ("Joel Máx (°)", 'stats', 'Joel', 'max', None, None, True, 'Cinemática'),
+                ("Joel Mín (°)", 'stats', 'Joel', 'min', None, None, True, 'Cinemática'),
+                ("Torn Máx (°)", 'stats', 'Torn', 'max', None, None, True, 'Cinemática'),
+                ("Torn Mín (°)", 'stats', 'Torn', 'min', None, None, True, 'Cinemática'),
             ]
 
-            pares_coord = [('QJ DIR', 'Quad_Joel_D'), ('QJ ESQ', 'Quad_Joel_E'), 
-                           ('JT DIR', 'Joel_Torn_D'), ('JT ESQ', 'Joel_Torn_E')]
-            
-            for par_label, par_key in pares_coord:
+            pares_coord_base = [('QJ', 'Quad_Joel'), ('JT', 'Joel_Torn')]
+            for par_label, par_key in pares_coord_base:
                 for padrao in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
-                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 0, 60, 'Coord. Apoio'))
-                    vars_relatorio.append((f"{par_label} - {padrao}", 'coord_fase', par_key, padrao, 60, 101, 'Coord. Balanço'))
+                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True, 'Coord. Apoio'))
+                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101, True, 'Coord. Balanço'))
 
-            # 2. Processamento Estatístico
-            for label, cat, key1, key2, inicio, fim, categoria in vars_relatorio:
-                data_g1, data_g2 = [], []
+            # 2. Motor Estatístico Duplo e Gerador de Narrativa
+            for label, cat, key1_base, key2, inicio, fim, is_bilateral, categoria in vars_base_relatorio:
+                dados_g1 = {'D': [], 'E': [], 'M': [], 'U': []}
+                dados_g2 = {'D': [], 'E': [], 'M': [], 'U': []}
+                
                 for p in st.session_state.processadores:
                     try:
-                        val = np.nan
-                        if cat == 'attr': val = getattr(p, key1)
-                        elif cat == 'fases': val = p.fases_marcha.get(key1, {}).get(key2, np.nan)
-                        elif cat == 'clearance': val = p.foot_clearance.get(key1, np.nan)
-                        elif cat == 'passo_norm': val = getattr(p, 'passo_norm', {}).get(key1, np.nan)
-                        elif cat == 'stats': val = p.obter_stats().get(key1, {}).get(key2, np.nan)
-                        elif cat == 'coord_fase':
-                            if hasattr(p, 'coord_vetorial_series') and key1 in p.coord_vetorial_series:
-                                fatia = p.coord_vetorial_series[key1][inicio:fim]
-                            else:
-                                prox_name, dist_name, lado = key1.split('_')[0], key1.split('_')[1], key1.split('_')[2]
-                                ciclo_p = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{prox_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
-                                ciclo_d = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{dist_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
-                                dp, dd = np.diff(ciclo_p), np.diff(ciclo_d)
-                                idxs = np.digitize((np.degrees(np.arctan2(dd, dp)) + 360) % 360, [0, 45, 135, 225, 315, 360])
-                                map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
-                                fatia = [map_labels[i] for i in idxs[inicio:fim]]
-                            if len(fatia) > 0: val = (fatia.count(key2) / len(fatia)) * 100
+                        target = dados_g1 if p.grupo == g_controle else dados_g2
                         
-                        if not np.isnan(val):
-                            if p.grupo == g_controle: data_g1.append(val)
-                            elif p.grupo == g_teste: data_g2.append(val)
+                        if not is_bilateral:
+                            val = getattr(p, key1_base, np.nan) if cat == 'attr' else np.nan
+                            if not np.isnan(val): target['U'].append(val)
+                        else:
+                            vd, ve = np.nan, np.nan
+                            for lado in ['D', 'E']:
+                                v = np.nan
+                                k1 = f"{key1_base}_{lado}" if key1_base and cat in ['stats', 'coord_fase'] else key1_base
+                                
+                                if cat == 'fases': v = p.fases_marcha.get(lado, {}).get(key2, np.nan)
+                                elif cat == 'clearance': v = p.foot_clearance.get(lado, np.nan)
+                                elif cat == 'passo': v = p.comprimento_passo.get(lado, np.nan)
+                                elif cat == 'passo_norm': v = getattr(p, 'passo_norm', {}).get(lado, np.nan)
+                                elif cat == 'stats':
+                                    s = p.obter_stats() or {}
+                                    v = s.get(k1, {}).get(key2, np.nan)
+                                elif cat == 'coord_fase':
+                                    if hasattr(p, 'coord_vetorial_series') and k1 in p.coord_vetorial_series:
+                                        fatia = p.coord_vetorial_series[k1][inicio:fim]
+                                    else:
+                                        prox_name, dist_name = key1_base.split('_')[0], key1_base.split('_')[1]
+                                        ciclo_p = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{prox_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
+                                        ciclo_d = np.mean(p.extrair_ciclos_normalizados(p.angulos_df[f"{dist_name}_{lado}"].values, p.eventos[lado]['HS']), axis=0)
+                                        dp, dd = np.diff(ciclo_p), np.diff(ciclo_d)
+                                        idxs = np.digitize((np.degrees(np.arctan2(dd, dp)) + 360) % 360, [0, 45, 135, 225, 315, 360])
+                                        map_labels = {1: 'Proximal', 2: 'EmFase', 3: 'Distal', 4: 'AntiFase', 5: 'Proximal'}
+                                        fatia = [map_labels[i] for i in idxs[inicio:fim]]
+                                    if len(fatia) > 0: v = (fatia.count(key2) / len(fatia)) * 100
+                                        
+                                if lado == 'D': vd = v
+                                else: ve = v
+                            
+                            if not np.isnan(vd) and not np.isnan(ve):
+                                target['D'].append(vd); target['E'].append(ve); target['M'].append((vd + ve) / 2)
                     except: continue
 
-                if len(data_g1) > 2 and len(data_g2) > 2:
-                    _, p_norm1 = sp_stats.shapiro(data_g1)
-                    _, p_norm2 = sp_stats.shapiro(data_g2)
-                    is_normal = (p_norm1 > 0.05 and p_norm2 > 0.05)
-                    
-                    if is_normal:
-                        _, p_val = sp_stats.ttest_ind(data_g1, data_g2, equal_var=(sp_stats.levene(data_g1, data_g2)[1] > 0.05))
-                        s_pool = np.sqrt((np.var(data_g1, ddof=1) + np.var(data_g2, ddof=1)) / 2)
-                        efeito = (np.mean(data_g1) - np.mean(data_g2)) / s_pool if s_pool > 0 else 0
-                    else:
-                        u_stat, p_val = sp_stats.mannwhitneyu(data_g1, data_g2, alternative='two-sided')
-                        efeito = 1 - (2 * u_stat) / (len(data_g1) * len(data_g2))
-
-                    media_c, media_t = np.mean(data_g1), np.mean(data_g2)
-                    tendencia = "Redução" if media_c > media_t else "Aumento"
-
-                    # 3. Lógica de Agrupamento
-                    lado = 'ÚNICO'
-                    base_label = label
-                    if 'DIR' in label:
-                        lado = 'DIR'
-                        base_label = label.replace('DIR', '').replace('  ', ' ').strip()
-                    elif 'ESQ' in label:
-                        lado = 'ESQ'
-                        base_label = label.replace('ESQ', '').replace('  ', ' ').strip()
-                    
-                    if base_label not in resultados_agrupados[categoria]:
-                        resultados_agrupados[categoria][base_label] = {}
-                    
-                    resultados_agrupados[categoria][base_label][lado] = {
-                        'sig': p_val < 0.05, 'p': p_val, 'efeito': abs(efeito), 
-                        'tendencia': tendencia, 'media_c': media_c, 'media_t': media_t
-                    }
-
-            # 4. Função Geradora de Textos Agrupados
-            def gerar_texto_laudo(dicionario_categoria):
-                textos = []
-                for base, lados in dicionario_categoria.items():
-                    if 'DIR' in lados and 'ESQ' in lados:
-                        d, e = lados['DIR'], lados['ESQ']
-                        
-                        if d['sig'] and e['sig']:
-                            dir_efeito = "negativo" if d['tendencia'] == "Redução" else "positivo"
-                            esq_efeito = "negativo" if e['tendencia'] == "Redução" else "positivo"
-                            textos.append(f"🔄 **{base}**: Alteração bilateral significativa. O grupo {g_teste} apresentou **{d['tendencia'].lower()}** no lado direito (*p={d['p']:.3f}, tamanho de efeito={d['efeito']:.2f}*) e **{e['tendencia'].lower()}** no esquerdo (*p={e['p']:.3f}, tamanho de efeito={e['efeito']:.2f}*).")
-                        
-                        elif d['sig'] and not e['sig']:
-                            textos.append(f"⚠️ **{base}**: Assimetria detectada. Apenas o lado **DIREITO** apresentou **{d['tendencia'].lower()}** significativa no grupo {g_teste} (*p={d['p']:.3f}, tamanho de efeito={d['efeito']:.2f}*). O lado esquerdo não teve diferença estatística.")
-                        
-                        elif not d['sig'] and e['sig']:
-                            textos.append(f"⚠️ **{base}**: Assimetria detectada. Apenas o lado **ESQUERDO** apresentou **{e['tendencia'].lower()}** significativa no grupo {g_teste} (*p={e['p']:.3f}, tamanho de efeito={e['efeito']:.2f}*). O lado direito não teve diferença estatística.")
-                    
-                    elif 'ÚNICO' in lados:
-                        u = lados['ÚNICO']
-                        if u['sig']:
-                            textos.append(f"📈 **{base}**: **{u['tendencia']}** significativa no grupo {g_teste} (*p={u['p']:.3f}, tamanho de efeito={u['efeito']:.2f}*).")
+                houve_achado = False
+                texto_narrativo = f"**{label}**: "
+                texto_intra = ""
                 
-                return textos
+                # --- A) Lógica Narrativa Intra-grupo ---
+                if is_bilateral:
+                    achou_intra = False
+                    for i, (g_nome, d_grp) in enumerate([(g_controle, dados_g1), (g_teste, dados_g2)]):
+                        if len(d_grp['D']) > 2 and len(d_grp['E']) > 2:
+                            _, p_nd = sp_stats.shapiro(d_grp['D'])
+                            _, p_ne = sp_stats.shapiro(d_grp['E'])
+                            if p_nd > 0.05 and p_ne > 0.05:
+                                _, p_intra = sp_stats.ttest_rel(d_grp['D'], d_grp['E'])
+                            else:
+                                _, p_intra = sp_stats.wilcoxon(d_grp['D'], d_grp['E'])
+                                
+                            if p_intra < 0.05:
+                                dir_val, esq_val = np.mean(d_grp['D']), np.mean(d_grp['E'])
+                                direcao = "redução" if dir_val < esq_val else "aumento"
+                                
+                                if i == 0:
+                                    texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do valor do lado direito em relação ao esquerdo (*p={p_intra:.3f}*)"
+                                else:
+                                    if achou_intra:
+                                        texto_intra += f", e o grupo **{g_nome}** também apresentou {direcao} (*p={p_intra:.3f}*)"
+                                    else:
+                                        texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do valor do lado direito em relação ao esquerdo (*p={p_intra:.3f}*), enquanto o grupo **{g_controle}** não apresentou assimetria significativa"
+                                achou_intra = True
+                                houve_achado = True
+                            else:
+                                if i == 1 and achou_intra:
+                                    texto_intra += f", enquanto o grupo **{g_nome}** não apresentou assimetria"
+                    
+                    if achou_intra:
+                        texto_narrativo += texto_intra + ". "
 
-            # 5. Exibição do Relatório
+                # --- B) Lógica Narrativa Entre-grupos ---
+                arr_g1 = dados_g1['M'] if is_bilateral else dados_g1['U']
+                arr_g2 = dados_g2['M'] if is_bilateral else dados_g2['U']
+                
+                if len(arr_g1) > 2 and len(arr_g2) > 2:
+                    _, p_norm1 = sp_stats.shapiro(arr_g1)
+                    _, p_norm2 = sp_stats.shapiro(arr_g2)
+                    
+                    if p_norm1 > 0.05 and p_norm2 > 0.05:
+                        _, p_lev = sp_stats.levene(arr_g1, arr_g2)
+                        _, p_entre = sp_stats.ttest_ind(arr_g1, arr_g2, equal_var=(p_lev > 0.05))
+                    else:
+                        _, p_entre = sp_stats.mannwhitneyu(arr_g1, arr_g2, alternative='two-sided')
+                        
+                    if p_entre < 0.05:
+                        m1, m2 = np.mean(arr_g1), np.mean(arr_g2)
+                        diff_tipo = "superior" if m2 > m1 else "inferior"
+                        prefixo_entre = "Ademais, na comparação entre grupos" if houve_achado else "Na comparação entre grupos"
+                        base_txt = "avaliando a média bilateral" if is_bilateral else "avaliando o valor global"
+                        
+                        texto_narrativo += f"{prefixo_entre} ({base_txt}), o grupo **{g_teste}** apresentou performance **{diff_tipo}** em relação ao grupo **{g_controle}** (*p={p_entre:.3f}*)."
+                        houve_achado = True
+
+                if houve_achado:
+                    resultados_agrupados[categoria].append(texto_narrativo)
+
+            # 3. Renderização Categorizada
             categorias_nomenclatura = [
                 ('Espaço-Temporal', "### 🚶 Parâmetros Espaço-Temporais"),
                 ('Cinemática', "### 📐 Cinemática Articular (Amplitudes)"),
@@ -1564,13 +1513,18 @@ if st.session_state.processadores:
 
             for chave, titulo in categorias_nomenclatura:
                 st.markdown(titulo)
-                achados = gerar_texto_laudo(resultados_agrupados[chave])
-                if achados:
-                    for a in achados: st.markdown(a)
+                if len(resultados_agrupados[chave]) > 0:
+                    for achado in resultados_agrupados[chave]:
+                        st.markdown("- " + achado)
                 else: 
-                    st.write("Nenhuma diferença clinicamente significativa detectada nesta categoria.")
-			
-			# --- SEÇÃO DE ASSIMETRIA CLÍNICA ---
+                    st.write("*Nenhuma diferença clinicamente significativa (Intra ou Entre grupos) detectada nesta categoria.*")
+                st.write("")
+
+            # =================================================================
+            # O RESTANTE ABAIXO FOI MANTIDO EXATAMENTE COMO VOCÊ CONFIGUROU
+            # =================================================================
+            
+            # --- SEÇÃO DE ASSIMETRIA CLÍNICA ---
             st.markdown("### ⚖️ Análise de Assimetria e Dominância")
             
             variaveis_ia = ['Passo', 'Apoio', 'Clearance']
@@ -1613,14 +1567,11 @@ if st.session_state.processadores:
             else:
                 st.write("Não foram detectadas assimetrias clinicamente significativas entre os grupos.")
 
-		
+        
             st.markdown("---")
             st.markdown("### 📚 Referências Metodológicas (Engine do Software)")
-            st.info("Os algoritmos de extração e estatística do GPBIO são fundamentados na literatura científica validada:")
-            
             st.markdown("""
-            1. **Índice de Simetria (SI):** 
-			   *ROBINSON, R. O.; HERZOG, W.; NIGG, B. M. Use of force platform variables to quantify the effects of chiropractic manipulation on gait symmetry. Journal of Prosthetic and Orthotics, v. 11, n. 4, p. 172-176, 1987.*
+            1. **Índice de Simetria (SI):** *ROBINSON, R. O.; HERZOG, W.; NIGG, B. M. Use of force platform variables to quantify the effects of chiropractic manipulation on gait symmetry. Journal of Prosthetic and Orthotics, v. 11, n. 4, p. 172-176, 1987.*
                *(Utilizado para quantificar a magnitude da assimetria bilateral em % nas variáveis espaço-temporais).*
                
             2. **Detecção Cinemática de Eventos da Marcha:**
@@ -1635,7 +1586,5 @@ if st.session_state.processadores:
                *SHAPIRO, S. S.; WILK, M. B. An analysis of variance test for normality (complete samples). Biometrika, v. 52, n. 3/4, p. 591-611, 1965.*
                *(Motor primário do fluxo de decisão para seleção entre testes paramétricos e não-paramétricos).*
             """)
-            
-            # Botão extra para exportar o laudo completo (Opcional, mas muito útil)
             if st.button("🖨️ Preparar Relatório para Impressão (Ctrl+P)", use_container_width=True):
                 st.toast("Relatório pronto! Pressione Ctrl+P no seu navegador para salvar em PDF.")
