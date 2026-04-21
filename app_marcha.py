@@ -1570,7 +1570,9 @@ if st.session_state.processadores:
                 else: 
                     st.write("Nenhuma diferença clinicamente significativa detectada nesta categoria.")
 			
-			st.markdown("### ⚖️ Análise de Assimetria e Dominância")
+			# --- SEÇÃO DE ASSIMETRIA CLÍNICA ---
+            st.markdown("### ⚖️ Análise de Assimetria e Dominância")
+            
             variaveis_ia = ['Passo', 'Apoio', 'Clearance']
             achados_assimetria = []
             contagem_parkinson = 0
@@ -1601,6 +1603,7 @@ if st.session_state.processadores:
                     if p_val < 0.05:
                         razao = media_ia_t / media_ia_c if media_ia_c > 0 else 0
                         achados_assimetria.append(f"🔴 **{var}**: Índice de Simetria (SI) significativamente alterado no grupo {g_teste} (*p={p_val:.3f}*). A magnitude da assimetria bilateral, calculada pelo método de Robinson et al. (1987), é **{razao:.1f}x maior** que no grupo Controle ({media_ia_t:.1f}% vs {media_ia_c:.1f}%).")
+
             # Resumo Narrativo Final
             if contagem_parkinson > 0:
                 frequencia_relativa = contagem_parkinson / max(contagem_controle, 1)
