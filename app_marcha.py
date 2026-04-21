@@ -5,7 +5,7 @@ import pandas as pd
 import scipy.signal as signal
 import scipy.stats as sp_stats
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg') # Otimização de memória para uso em servidores web (Streamlit)
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
@@ -22,15 +22,26 @@ st.set_page_config(page_title="GPBIO - Biomecânica Clínica", layout="wide", pa
 # =============================================================================
 # ENGINE MATEMÁTICA 
 # =============================================================================
-def vetor(p1, p2): return p2 - p1
+def vetor(p1, p2): 
+    """Retorna o vetor direcional entre dois pontos 3D."""
+    return p2 - p1
+
 def normalizar(v):
+    """Normaliza um vetor para magnitude 1 (vetor unitário)."""
     norm = np.linalg.norm(v)
     return v if norm == 0 else v / norm
+
 def angulo_entre(v1, v2):
+    """Calcula o ângulo em graus entre dois vetores 3D."""
     v1_u, v2_u = normalizar(v1), normalizar(v2)
     return np.degrees(np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)))
 
 class ProcessadorCinematico:
+    """
+    Motor principal de processamento biomecânico. 
+    Lê arquivos C3D, extrai marcadores, aplica filtros de Butterworth, 
+    calcula cinemática articular e eventos da marcha.
+    """
     def __init__(self, caminho_arquivo, nome_original, grupo="Geral", df_antropo=None):
         self.caminho = caminho_arquivo
         self.nome_arq = nome_original
@@ -54,7 +65,7 @@ class ProcessadorCinematico:
             self.foot_clearance = self._calcular_foot_clearance()
             self.comprimento_passo = self._calcular_comprimento_passo()
 
-            # --- NOVO: NORMALIZAÇÃO ANTROPOMÉTRICA BLINDADA E INTELIGENTE ---
+            # --- NORMALIZAÇÃO ANTROPOMÉTRICA BLINDADA E INTELIGENTE ---
             self.passo_norm = {'D': np.nan, 'E': np.nan}
             if df_antropo is not None:
                 nome_limpo = nome_original.lower().replace('.c3d', '')
@@ -77,11 +88,10 @@ class ProcessadorCinematico:
                             self.passo_norm['D'] = ((val_d / 1000.0) / altura_m) * 100.0
                         if not np.isnan(val_e) and val_e > 0:
                             self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0
-            # -----------------------------------------------------------------
             
             self.coord_vetorial = self._calcular_coordenacao_vetorial()
 
-            # --- NOVO: MOTOR DE ASSIMETRIA ---
+            # --- MOTOR DE ASSIMETRIA ---
             self.indices_assimetria = {}
             pares = [
                 ('Passo', self.passo_norm['D'], self.passo_norm['E']),
@@ -94,7 +104,6 @@ class ProcessadorCinematico:
                     self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100.0
                 else:
                     self.indices_assimetria[nome] = np.nan
-            # ---------------------------------
 
             self.valido = True
         except Exception as e:
@@ -102,6 +111,7 @@ class ProcessadorCinematico:
             self.valido = False
             
     def _get(self, nome, f):
+        """Busca as coordenadas (x,y,z) de um marcador específico no frame 'f'."""
         idx = self.mapa.get(nome)
         if idx is not None:
             v = self.dados[:, idx, f]
@@ -109,11 +119,13 @@ class ProcessadorCinematico:
         return None
 
     def _mid(self, n1, n2, f):
+        """Calcula o ponto médio virtual entre dois marcadores."""
         p1, p2 = self._get(n1, f), self._get(n2, f)
         if p1 is not None and p2 is not None: return (p1+p2)/2
         return None
 
     def _filtrar_e_inverter(self):
+        """Aplica filtro passa-baixa de Butterworth (4ª ordem, 6Hz) para suavizar ruídos de captação."""
         d = self.dados_raw.copy()
         d[d==0.0] = np.nan
         nyq = 0.5 * self.freq
@@ -123,16 +135,17 @@ class ProcessadorCinematico:
             for ax in range(3):
                 sinal = d[ax, m, :]
                 if np.isnan(sinal).all(): continue
-                
                 s_temp = pd.Series(sinal).interpolate(limit_direction='both').bfill().ffill()
                 try:
                     filt = signal.filtfilt(b, a, s_temp.to_numpy())
                     out[ax, m, :] = filt
-                except: out[ax, m, :] = s_temp
-        out[0, :, :] = -1 * out[0, :, :]
+                except Exception: 
+                    out[ax, m, :] = s_temp
+        out[0, :, :] = -1 * out[0, :, :] # Inversão de eixo X para padronização visual
         return out
 
     def _calcular_angulos(self):
+        """Calcula a cinemática angular 3D no plano sagital para Quadril, Joelho e Tornozelo."""
         res = {k: [] for k in ['Quad_D','Joel_D','Torn_D','Quad_E','Joel_E','Torn_E']}
         vec_g = np.array([0,0,-1])
         for f in range(self.n_frames):
@@ -148,6 +161,7 @@ class ProcessadorCinematico:
         return pd.DataFrame(res)
 
     def detectar_eventos_zeni(self):
+        """Algoritmo de Zeni (2008) para marcação automática de Heel Strike e Toe Off via cinemática da pelve."""
         eventos = {'D': {'HS': [], 'TO': []}, 'E': {'HS': [], 'TO': []}}
         
         rias_data = self._get('RIAS', slice(None))
@@ -183,16 +197,19 @@ class ProcessadorCinematico:
         return eventos
 
     def obter_stats(self):
+        """Gera dicionário com valores máximos e mínimos para cada ângulo articular processado."""
         if not self.valido: return None
         return {col: {'min': self.angulos_df[col].min(), 'max': self.angulos_df[col].max()} for col in self.angulos_df.columns}
 
     def _calcular_velocidade_sacrum(self):
+        """Mede a velocidade média de deslocamento linear do centro de massa (Sacro)."""
         rips, lips = self._get('RIPS', slice(None)), self._get('LIPS', slice(None))
         if rips is None or lips is None: return np.nan
         sacrum = (rips + lips) / 2
         return np.nanmean(np.linalg.norm(np.diff(sacrum, axis=1), axis=0) * self.freq / 1000.0)
 
     def _calcular_fases_marcha(self):
+        """Calcula o percentual do ciclo gasto na fase de Apoio e Balanço."""
         res = {'D': {'Apoio': np.nan, 'Balanco': np.nan}, 'E': {'Apoio': np.nan, 'Balanco': np.nan}}
         for lado in ['D', 'E']:
             hss, tos = self.eventos[lado]['HS'], self.eventos[lado]['TO']
@@ -204,10 +221,13 @@ class ProcessadorCinematico:
                     pct = ((to_valido[0] - hss[i]) / (hss[i+1] - hss[i])) * 100
                     if pct < 45.0: pct = 100.0 - pct
                     ciclos_apoio.append(pct)
-            if ciclos_apoio: res[lado]['Apoio'] = np.mean(ciclos_apoio); res[lado]['Balanco'] = 100.0 - np.mean(ciclos_apoio)
+            if ciclos_apoio: 
+                res[lado]['Apoio'] = np.mean(ciclos_apoio)
+                res[lado]['Balanco'] = 100.0 - np.mean(ciclos_apoio)
         return res
 
     def _calcular_foot_clearance(self):
+        """Calcula a altura máxima do pé em relação ao solo durante o balanço (Risco de tropeço)."""
         res = {'D': np.nan, 'E': np.nan}
         for lado, pref in [('D', 'R'), ('E', 'L')]:
             ft1 = self._get(f'{pref}FT1', slice(None))
@@ -218,6 +238,7 @@ class ProcessadorCinematico:
         return res
 
     def _calcular_comprimento_passo(self):
+        """Mede a distância euclidiana (em mm) entre calcanhar e a ponta do outro pé no contato inicial."""
         res = {'D': np.nan, 'E': np.nan}
         rcal, lcal = self._get('RCAL', slice(None)), self._get('LCAL', slice(None))
         rft1, lft1 = self._get('RFT1', slice(None)), self._get('LFT1', slice(None))
@@ -229,6 +250,7 @@ class ProcessadorCinematico:
         return res
 
     def extrair_ciclos_normalizados(self, vetor_dados, eventos_hs, pontos=101):
+        """Interpola os dados brutos de um ciclo de marcha para uma escala de 0 a 100%."""
         ciclos = []
         if len(eventos_hs) < 2: return []
         for i in range(len(eventos_hs) - 1):
@@ -238,6 +260,7 @@ class ProcessadorCinematico:
         return ciclos
 
     def _calcular_coordenacao_vetorial(self):
+        """Aplica o método de Vector Coding (Ângulo de Acoplamento) para medir a coordenação interarticular."""
         res = {par: {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan} for par in ['Quad_Joel_D', 'Quad_Joel_E', 'Joel_Torn_D', 'Joel_Torn_E']}
         for lado in ['D', 'E']:
             hss = self.eventos[lado]['HS']
@@ -263,9 +286,8 @@ class ProcessadorCinematico:
 # =============================================================================
 # MÓDULO VISUAL (GIFs) 
 # =============================================================================
-import matplotlib.patches as mpatches
-
 class GeradorVisual:
+    """Motor de renderização 3D e animação gráfica em tempo real dos pacientes."""
     def __init__(self, processador, nome_original):
         self.proc = processador
         self.nome_arq = nome_original
@@ -277,12 +299,13 @@ class GeradorVisual:
             }
 
     def montar_frame(self, f):
+        """Recupera as coordenadas das linhas do esqueleto para um frame específico."""
         s = {}
         get = lambda n: self.proc._get(n, f)
         mid = lambda n1, n2: self.proc._mid(n1, n2, f)
-        rias, lias = get('RIAS'), get('LIAS'); rips, lips = get('RIPS'), get('LIPS')
+        rias, lias = get('RIAS'), get('LIAS')
+        rips, lips = get('RIPS'), get('LIPS')
         rict, lict = get('RICT'), get('LICT')
-        
         
         if rias is not None and lias is not None: s['P_F']=[rias,lias]
         if rips is not None and lips is not None: s['P_B']=[rips,lips]
@@ -290,7 +313,6 @@ class GeradorVisual:
         if rips is not None and rict is not None: s['PR2']=[rips,rict] 
         if lias is not None and lict is not None: s['PL1']=[lias,lict]
         if lips is not None and lict is not None: s['PL2']=[lips,lict] 
-        
         
         kd, ke = mid('RLE','RME'), mid('LLE','LME')
         td, te = mid('RML','RMM'), mid('LML','LMM')
@@ -307,6 +329,7 @@ class GeradorVisual:
         return s
 
     def _desenhar_fundo_bussola(self, ax_c, titulo):
+        """Renderiza o fundo do medidor polar de coordenação."""
         ax_c.set_xlim(-1.2, 1.2); ax_c.set_ylim(-1.2, 1.2)
         ax_c.axis('off'); ax_c.set_aspect('equal')
         ax_c.text(0, 1.35, titulo, ha='center', va='center', fontsize=9, fontweight='bold')
@@ -331,6 +354,7 @@ class GeradorVisual:
         else: return "ANTI-FASE", '#f1c40f'
 
     def salvar(self, caminho_final, step=3, fps_anim=20):
+        """Processa e salva o arquivo de GIF animado com biofeedback."""
         fig = plt.figure(figsize=(16, 9))
         
         ax_comp_qj_d = fig.add_axes([0.01, 0.65, 0.15, 0.25])
@@ -370,35 +394,36 @@ class GeradorVisual:
         ax_stats_left.text(0.00, 0.85, col_dir, va='top', fontsize=9, family='monospace')
         ax_stats_left.text(0.55, 0.85, col_esq, va='top', fontsize=9, family='monospace')
 
-        
         ax_banner.text(0.5, 0.90, "PADRÕES DE COORDENAÇÃO EM TEMPO REAL", ha='center', va='top', fontweight='bold', fontsize=11)
         
-      
         ax_banner.text(0.00, 0.50, "Quad-Joel (DIR):", fontweight='bold', fontsize=10)
         ax_banner.text(0.00, 0.15, "Joel-Torn (DIR):", fontweight='bold', fontsize=10)
         txt_qj_d = ax_banner.text(0.24, 0.50, "-", fontweight='bold', fontsize=10)
         txt_jt_d = ax_banner.text(0.24, 0.15, "-", fontweight='bold', fontsize=10)
 
-        
         ax_banner.text(0.53, 0.50, "Quad-Joel (ESQ):", fontweight='bold', fontsize=10)
         ax_banner.text(0.53, 0.15, "Joel-Torn (ESQ):", fontweight='bold', fontsize=10)
         txt_qj_e = ax_banner.text(0.77, 0.50, "-", fontweight='bold', fontsize=10)
         txt_jt_e = ax_banner.text(0.77, 0.15, "-", fontweight='bold', fontsize=10)
-        
 
         t_dynamic = ax_txt.text(0.05, 0.95, "", va='top', fontsize=10, family='monospace')
         linhas = {}
 
         def update(i):
             seg = self.montar_frame(i)
+        
             for k in list(linhas):
-                if k not in seg: linhas[k].remove(); del linhas[k]
+                if k not in seg: 
+                    linhas[k].remove()
+                    del linhas[k]
             for n, (p1, p2) in seg.items():
                 c = 'red' if 'D' in n or 'R' in n else 'blue'
                 if 'P_' in n or 'PL' in n or 'PR' in n: c = 'black'
                 if n in linhas:
-                    linhas[n].set_data([p1[0],p2[0]],[p1[1],p2[1]]); linhas[n].set_3d_properties([p1[2],p2[2]])
-                else: linhas[n], = ax.plot([p1[0],p2[0]],[p1[1],p2[1]],[p1[2],p2[2]], c=c, lw=2)
+                    linhas[n].set_data([p1[0],p2[0]],[p1[1],p2[1]])
+                    linhas[n].set_3d_properties([p1[2],p2[2]])
+                else: 
+                    linhas[n], = ax.plot([p1[0],p2[0]],[p1[1],p2[1]],[p1[2],p2[2]], c=c, lw=2)
 
             row = self.proc.angulos_df.iloc[i]
             info = "DADOS ARTICULARES\n" + "="*17 + "\n\n"
@@ -440,6 +465,7 @@ class GeradorVisual:
         except Exception as e:
             return False, str(e)
         finally:
+            plt.close(fig)
             plt.close('all')
 
 # =============================================================================
@@ -473,14 +499,12 @@ st.sidebar.markdown("### Sobre o Sistema")
 st.sidebar.info("GPBIO: Análise Biomecânica de Marcha.")
 st.sidebar.markdown("**Desenvolvido por Arthur Lins**")
 	
-
 if 'processadores' not in st.session_state:
     st.session_state.processadores = []
 
 st.subheader("📁 Importação de Dados e Separação de Grupos")
 st.info("Digite os nomes dos grupos do seu estudo e faça o upload dos arquivos .c3d dinâmicos em suas respectivas áreas.")
 
-# Cria duas colunas visuais para o Upload
 col_g1, col_g2 = st.columns(2)
 
 with col_g1:
@@ -492,7 +516,6 @@ with col_g2:
     files_g2 = st.file_uploader(f"Arquivos C3D - {nome_g2}", type=['c3d'], accept_multiple_files=True, key="up_g2")
 
 if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width=True):
-    
     arquivos_para_processar = []
     if files_g1:
         arquivos_para_processar.extend([(f, nome_g1) for f in files_g1 if "CAL" not in f.name.upper()])
@@ -506,16 +529,13 @@ if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width
         progress_bar = st.progress(0)
         
         for i, (file, nome_grupo) in enumerate(arquivos_para_processar):
-            
             file.seek(0) 
             with tempfile.NamedTemporaryFile(delete=False, suffix='.c3d') as tmp_file:
                 tmp_file.write(file.read()) 
                 tmp_file.flush()            
                 os.fsync(tmp_file.fileno()) 
                 tmp_path = tmp_file.name
-            
                 
-            
             proc = ProcessadorCinematico(tmp_path, file.name, grupo=nome_grupo, df_antropo=df_antropo)
             
             if proc.valido: 
@@ -523,16 +543,14 @@ if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width
             else: 
                 st.error(f"Erro no arquivo {file.name}: {proc.erro_msg}")
                 
-            
             try:
                 os.remove(tmp_path)
-            except:
+            except Exception:
                 pass 
                 
             progress_bar.progress((i + 1) / len(arquivos_para_processar))
             
         st.success(f"✅ {len(st.session_state.processadores)} arquivos processados e agrupados com sucesso!")
-
 
 if st.session_state.processadores:
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -546,20 +564,19 @@ if st.session_state.processadores:
     ])
 
     # =========================================================================
-    # TAB 1: TABELA DE MÉDIAS (DADOS BRUTOS + MÉTRICAS AVANÇADAS + SUMÁRIOS)
+    # TAB 1: TABELA DE MÉDIAS
     # =========================================================================
     with tab1:
         st.subheader("📊 Tabela de Dados Brutos e Estatística Descritiva")
-        st.write("Visão geral de todos os parâmetros espaço-temporais, cinemáticos e de coordenação, incluindo métricas avançadas (CAV e Transições). Ao final da tabela, são apresentadas as médias e desvios padrão de cada grupo.")
+        st.write("Visão geral de todos os parâmetros. Ao final da tabela, são apresentadas as médias e desvios padrão de cada grupo.")
         
         dados_tabela = []
         for p in st.session_state.processadores:
             try:
-                # 1. Parâmetros Espaço-Temporais Básicos
                 linha = {
                     "Arquivo": p.nome_arq,
                     "Grupo": p.grupo,
-                    "Velocidade (m/s)": p.velocidade_media if hasattr(p, 'velocidade_media') else np.nan,
+                    "Velocidade (m/s)": getattr(p, 'velocidade_media', np.nan),
                     "Apoio DIR (%)": p.fases_marcha.get('D', {}).get('Apoio', np.nan),
                     "Apoio ESQ (%)": p.fases_marcha.get('E', {}).get('Apoio', np.nan),
                     "Clearance DIR (mm)": p.foot_clearance.get('D', np.nan),
@@ -570,14 +587,12 @@ if st.session_state.processadores:
                     "Passo ESQ (% Altura)": p.passo_norm.get('E', np.nan) if hasattr(p, 'passo_norm') else np.nan,
                 }
                 
-                # 2. Parâmetros Cinemáticos (Picos Máximos e Mínimos)
                 stats = p.obter_stats()
                 if stats:
                     for art in ['Quad_D', 'Quad_E', 'Joel_D', 'Joel_E', 'Torn_D', 'Torn_E']:
                         linha[f"{art} Máx (°)"] = stats.get(art, {}).get('max', np.nan)
                         linha[f"{art} Mín (°)"] = stats.get(art, {}).get('min', np.nan)
 
-                # 3. Coordenação Vetorial (CAV, Transições e Frequências Fatiadas)
                 pares_coord = [('QJ_DIR', 'Quad_Joel_D'), ('QJ_ESQ', 'Quad_Joel_E'),
                                ('JT_DIR', 'Joel_Torn_D'), ('JT_ESQ', 'Joel_Torn_E')]
                 padroes = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
@@ -587,7 +602,6 @@ if st.session_state.processadores:
                         prox_name, dist_name, lado = par_key.split('_')[0], par_key.split('_')[1], par_key.split('_')[2]
                         hss = p.eventos[lado]['HS']
                         
-                        # --- CÁLCULO DO CAV E TRANSIÇÕES ---
                         if len(hss) > 1:
                             c_prox = p.extrair_ciclos_normalizados(p.angulos_df[f"{prox_name}_{lado}"].values, hss)
                             c_dist = p.extrair_ciclos_normalizados(p.angulos_df[f"{dist_name}_{lado}"].values, hss)
@@ -598,13 +612,11 @@ if st.session_state.processadores:
                                 gamma_rad = np.arctan2(delta_d, delta_p)
                                 gamma_deg = (np.degrees(gamma_rad) + 360) % 360
                                 
-                                # CAV (Variabilidade)
                                 x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
                                 r = np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1)
                                 cav_mean = np.mean(np.sqrt(2 * (1 - r)) * (180 / np.pi))
                                 linha[f"CAV {par_label} (°)"] = cav_mean
                                 
-                                # Transições (Fluidez)
                                 bins = [0, 45, 135, 225, 315, 360]
                                 padroes_idx = np.digitize(gamma_deg, bins)
                                 padroes_idx[padroes_idx == 5] = 1
@@ -618,7 +630,6 @@ if st.session_state.processadores:
                             linha[f"CAV {par_label} (°)"] = np.nan
                             linha[f"Transições {par_label}"] = np.nan
 
-                        # --- FREQUÊNCIAS FATIADAS (APOIO/BALANÇO) ---
                         if hasattr(p, 'coord_vetorial_series') and par_key in p.coord_vetorial_series:
                             serie = p.coord_vetorial_series[par_key]
                         else:
@@ -632,16 +643,12 @@ if st.session_state.processadores:
                         for padrao in padroes:
                             val_apoio = (fatia_apoio.count(padrao) / len(fatia_apoio)) * 100 if len(fatia_apoio) > 0 else np.nan
                             linha[f"APOIO {par_label} - {padrao} (%)"] = val_apoio
-                            
                             val_balanco = (fatia_balanco.count(padrao) / len(fatia_balanco)) * 100 if len(fatia_balanco) > 0 else np.nan
                             linha[f"BALANÇO {par_label} - {padrao} (%)"] = val_balanco
-                            
-                    except Exception as e:
+                    except Exception:
                         linha[f"CAV {par_label} (°)"] = np.nan
                         linha[f"Transições {par_label}"] = np.nan
-                        pass
                 
-                # Arredonda tudo no final para deixar a tabela visualmente limpa
                 for k, v in linha.items():
                     if isinstance(v, float) and not np.isnan(v):
                         linha[k] = round(v, 2)
@@ -649,23 +656,16 @@ if st.session_state.processadores:
                         linha[k] = ""
 
                 dados_tabela.append(linha)
-            except Exception as e:
+            except Exception:
                 continue
                 
         if dados_tabela:
             df_tabela = pd.DataFrame(dados_tabela)
-            
-            # =================================================================
-            # CÁLCULO NATIVO DE MÉDIA E DESVIO PADRÃO POR GRUPO
-            # =================================================================
             summary_rows = []
-            
-            # Substitui strings vazias por NaN temporariamente para a matemática funcionar
             df_calc = df_tabela.replace("", np.nan)
             
             for grp in df_calc['Grupo'].unique():
                 df_grp = df_calc[df_calc['Grupo'] == grp]
-                
                 mean_row = {"Arquivo": f"📌 MÉDIA - {grp}", "Grupo": grp}
                 std_row = {"Arquivo": f"📉 DESVIO PADRÃO - {grp}", "Grupo": grp}
                 
@@ -679,16 +679,14 @@ if st.session_state.processadores:
                 summary_rows.append(mean_row)
                 summary_rows.append(std_row)
             
-            # Anexa as linhas de sumário no final da tabela
             df_summary = pd.DataFrame(summary_rows)
             df_final = pd.concat([df_tabela, df_summary], ignore_index=True)
             
-            # Formatação visual para destacar as métricas no Streamlit
             def highlight_summary(row):
                 if 'MÉDIA' in str(row['Arquivo']):
-                    return ['font-weight: bold'] * len(row) # Azul claro
+                    return ['font-weight: bold'] * len(row)
                 elif 'DESVIO PADRÃO' in str(row['Arquivo']):
-                    return ['font-weight: bold'] * len(row) # Vermelho claro
+                    return ['font-weight: bold'] * len(row)
                 return [''] * len(row)
 
             st.dataframe(df_final.style.apply(highlight_summary, axis=1), use_container_width=True, height=600)
@@ -728,7 +726,6 @@ if st.session_state.processadores:
                             ciclos = proc.extrair_ciclos_normalizados(proc.angulos_df[chave].values, hss)
                             dados_grp[chave].extend(ciclos)
 
-                # Gráfico mais estreito para caber na metade da tela
                 fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
                 mapeamento = [('Quad_D', 0, 0, 'Quad (DIR)'), ('Quad_E', 0, 1, 'Quad (ESQ)'), 
                               ('Joel_D', 1, 0, 'Joel (DIR)'), ('Joel_E', 1, 1, 'Joel (ESQ)'), 
@@ -753,6 +750,7 @@ if st.session_state.processadores:
 
                 plt.tight_layout()
                 st.pyplot(fig)
+                plt.close(fig) # Otimização de memória
 
     # =========================================================================
     # TAB 3: COORDENAÇÃO VETORIAL AVANÇADA (O CENTRO DE CONTROLE)
@@ -760,43 +758,37 @@ if st.session_state.processadores:
     with tab3:
         st.subheader("⚙️ Coordenação Vetorial e Controle Motor")
         
-        # --- TEXTO EDUCATIVO E CLÍNICO ---
         with st.expander("📖 Dicionário Clínico: Entenda as Métricas de Coordenação", expanded=False):
             st.markdown("""
-            O **Vector Coding** (Ângulo de Acoplamento) avalia **como** duas articulações trabalham juntas ao longo do tempo.
-            
+            O **Vector Coding** avalia **como** duas articulações trabalham juntas.
             **1. Frequência dos Padrões (Gráfico de Barras):**
-            * <span style='color:#e74c3c'>**Dominância Proximal (Vermelho):**</span> Articulação superior guia o movimento (ex: Quadril move, Joelho estabiliza).
-            * <span style='color:#2ecc71'>**Em Fase (Verde):**</span> Ambas fletem ou estendem juntas. Típico de movimentos fluidos e saudáveis.
+            * <span style='color:#e74c3c'>**Dominância Proximal (Vermelho):**</span> Articulação superior guia o movimento.
+            * <span style='color:#2ecc71'>**Em Fase (Verde):**</span> Ambas fletem ou estendem juntas. Típico de movimentos fluidos.
             * <span style='color:#3498db'>**Dominância Distal (Azul):**</span> Articulação inferior guia o movimento.
-            * <span style='color:#f1c40f'>**Anti-Fase (Amarelo):**</span> Uma flete enquanto a outra estende. Essencial para absorção de impacto, mas o excesso indica descoordenação patológica.
+            * <span style='color:#f1c40f'>**Anti-Fase (Amarelo):**</span> Uma flete enquanto a outra estende.
             
-            **2. Métricas de Estabilidade (Boxplots):**
-            * **Variabilidade (CAV):** Mede o "desvio padrão circular" da coordenação. Um sistema saudável tem adaptabilidade (CAV moderado). CAV muito alto = instabilidade motora (risco de queda). CAV muito baixo = rigidez articular e congelamento (comum em Parkinson rígido-acinético).
-            * **Taxa de Transições:** Conta quantas vezes o paciente "troca de marcha" entre os 4 padrões em um único passo. Mede a fluidez do comando neuromuscular.
+            **2. Métricas de Estabilidade:**
+            * **Variabilidade (CAV):** Mede a instabilidade ou rigidez.
+            * **Taxa de Transições:** Fluidez neuromuscular.
             """, unsafe_allow_html=True)
 
         st.markdown("---")
         grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
         
-        # Definição do layout de cores
         cor_g1 = '#a8c8f9'
         cor_g2 = '#f9a8a8'
         padroes = {'Proximal': '#e74c3c', 'EmFase': '#2ecc71', 'Distal': '#3498db', 'AntiFase': '#f1c40f'}
 
-        # Dicionários para acomodar dados extraídos
         dados_coord = {g: { 'Quad_Joel_D': [], 'Quad_Joel_E': [], 'Joel_Torn_D': [], 'Joel_Torn_E': [] } for g in grupos_estudo}
         freq_acumulada = {g: { 'Quad-Joel (DIR)': {k: [] for k in padroes}, 'Quad-Joel (ESQ)': {k: [] for k in padroes},
                                'Joel-Torn (DIR)': {k: [] for k in padroes}, 'Joel-Torn (ESQ)': {k: [] for k in padroes} } for g in grupos_estudo}
 
-        # Extração em massa e cálculo On-The-Fly
         cav_data = {'Quad_Joel': {g: [] for g in grupos_estudo}, 'Joel_Torn': {g: [] for g in grupos_estudo}}
         trans_data = {'Quad_Joel': {g: [] for g in grupos_estudo}, 'Joel_Torn': {g: [] for g in grupos_estudo}}
 
         for p in st.session_state.processadores:
             grp = p.grupo
             
-            # Coleta de Frequências Globais (Para o Gráfico de Barras)
             map_coord = [('Quad_Joel_D', 'Quad-Joel (DIR)'), ('Quad_Joel_E', 'Quad-Joel (ESQ)'),
                          ('Joel_Torn_D', 'Joel-Torn (DIR)'), ('Joel_Torn_E', 'Joel-Torn (ESQ)')]
             for c_old, c_new in map_coord:
@@ -805,7 +797,6 @@ if st.session_state.processadores:
                     val = freqs.get(k, np.nan)
                     if not np.isnan(val): freq_acumulada[grp][c_new][k].append(val)
 
-            # Coleta de Ciclos Brutos (Para os Diagramas de Fase e Cálculo de CAV/Transições)
             for prox, dist, label_cav in [('Quad', 'Joel', 'Quad_Joel'), ('Joel', 'Torn', 'Joel_Torn')]:
                 for lado in ['D', 'E']:
                     chave_prox, chave_dist = f"{prox}_{lado}", f"{dist}_{lado}"
@@ -817,7 +808,6 @@ if st.session_state.processadores:
                         c_dist = p.extrair_ciclos_normalizados(p.angulos_df[chave_dist].values, hss)
                         dados_coord[grp][chave_par].extend((c_prox, c_dist))
                         
-                        # Motor Matemático para CAV e Transições
                         if len(c_prox) > 0 and len(c_dist) > 0:
                             arr_p, arr_d = np.array(c_prox), np.array(c_dist)
                             delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
@@ -825,27 +815,19 @@ if st.session_state.processadores:
                             gamma_rad = np.arctan2(delta_d, delta_p)
                             gamma_deg = (np.degrees(gamma_rad) + 360) % 360
                             
-                            # Transições
                             bins = [0, 45, 135, 225, 315, 360]
                             padroes_idx = np.digitize(gamma_deg, bins)
-                            padroes_idx[padroes_idx == 5] = 1 # Ajuste do quadrante circular
+                            padroes_idx[padroes_idx == 5] = 1 
                             mudancas = np.sum(np.diff(padroes_idx, axis=1) != 0, axis=1)
                             trans_data[label_cav][grp].append(np.mean(mudancas))
                             
-                            # CAV (Variabilidade do Ângulo de Acoplamento)
                             x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
                             r = np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1)
                             cav_mean = np.mean(np.sqrt(2 * (1 - r)) * (180 / np.pi))
                             cav_data[label_cav][grp].append(cav_mean)
 
-        # -------------------------------------------------------------
-        # PARTE 1: DIAGRAMAS DE FASE
-        # -------------------------------------------------------------
         st.markdown("### 1. Comportamento Espacial (Diagramas Angle-Angle)")
-	
-	
         cols_t3 = st.columns(len(grupos_estudo))
-        
 
         for idx, grp in enumerate(grupos_estudo):
             with cols_t3[idx]:
@@ -879,21 +861,18 @@ if st.session_state.processadores:
                         ax.plot(media_prox, media_dist, color='blue' if lado=='E' else 'red', lw=2)
                         ax.scatter(media_prox[0], media_dist[0], color='green', s=60, zorder=5)
                         ax.scatter(media_prox[60], media_dist[60], color='orange', marker='X', s=60, zorder=5)
-                        
+                    
                     ax.set_xlabel(label_x, fontsize=9); ax.set_ylabel(label_y, fontsize=9)
                     ax.set_title(f"{prox}-{dist} ({lado})", fontweight='bold', fontsize=10)
                     ax.grid(True, linestyle='--', alpha=0.5)
 
                 plt.tight_layout()
                 st.pyplot(fig_coord)
+                plt.close(fig_coord) # Otimização de memória
 
-        # -------------------------------------------------------------
-        # PARTE 2: FREQUÊNCIA DE PADRÕES (DIVIDIDO POR APOIO E BALANÇO)
-        # -------------------------------------------------------------
         st.markdown("---")
         st.markdown("### 2. Distribuição por Fases (Apoio vs. Balanço)")
         
-        # Criamos abas internas para não poluir o visual
         sub_tab_apoio, sub_tab_balanco = st.tabs(["🦵 Fase de Apoio (0-60%)", "✈️ Fase de Balanço (60-100%)"])
         def plot_fase_especifica(container, inicio, fim, titulo_fase):
             cols_fase = container.columns(len(grupos_estudo))
@@ -936,7 +915,7 @@ if st.session_state.processadores:
                                     f_dist += fatia.count('Distal') / total_fatia
                                     f_anti += fatia.count('AntiFase') / total_fatia
                                     contagem += 1
-                            except: continue
+                            except Exception: continue
                         
                         denom = contagem if contagem > 0 else 1
                         m_prox.append((f_prox/denom)*100); m_fase.append((f_fase/denom)*100)
@@ -944,15 +923,12 @@ if st.session_state.processadores:
 
                     x, width = np.arange(len(labels_pares)), 0.55
                     
-                    # Salva as barras em variáveis para podermos colocar os textos dentro delas
                     bar1 = ax_bar.bar(x, m_prox, width, label='Proximal', color=padroes['Proximal'])
                     bar2 = ax_bar.bar(x, m_fase, width, bottom=m_prox, label='Em Fase', color=padroes['EmFase'])
                     bar3 = ax_bar.bar(x, m_dist, width, bottom=np.add(m_prox, m_fase), label='Distal', color=padroes['Distal'])
                     bar4 = ax_bar.bar(x, m_anti, width, bottom=np.add(np.add(m_prox, m_fase), m_dist), label='Anti-Fase', color=padroes['AntiFase'])
 
-                    # --- ADIÇÃO 1: Rótulos de Porcentagem em Preto ---
                     for bar_group in [bar1, bar2, bar3, bar4]:
-                        # A condição > 2.0 oculta o texto em faixas muito finas para não sobrepor números
                         lbls = [f"{v.get_height():.1f}%" if v.get_height() > 2.0 else "" for v in bar_group]
                         ax_bar.bar_label(bar_group, labels=lbls, label_type='center', color='black', fontweight='bold', fontsize=9)
 
@@ -960,26 +936,20 @@ if st.session_state.processadores:
                     ax_bar.set_xticks(x); ax_bar.set_xticklabels(labels_pares, fontweight='bold', rotation=15, fontsize=8)
                     ax_bar.set_ylim(0, 105)
                     
-                    # Limpeza visual: remove linhas de borda superior e direita
                     ax_bar.spines['top'].set_visible(False)
                     ax_bar.spines['right'].set_visible(False)
                     
-                    # --- ADIÇÃO 2: Legenda (Apenas no gráfico da extrema direita) ---
                     if idx == len(grupos_estudo) - 1:
                         leg = ax_bar.legend(loc='upper left', bbox_to_anchor=(1.02, 1), title="Padrões")
                         leg.get_title().set_fontweight('bold')
                     
                     plt.tight_layout()
                     st.pyplot(fig_bar)
+                    plt.close(fig_bar)
 
-        # Renderiza os gráficos nas sub-abas
         plot_fase_especifica(sub_tab_apoio, 0, 60, "Apoio")
         plot_fase_especifica(sub_tab_balanco, 60, 100, "Balanço")
 
-                
-        # -------------------------------------------------------------
-        # PARTE 3: COMPLEXIDADE E ESTABILIDADE (COLUNAS DE MÉDIA + DP)
-        # -------------------------------------------------------------
         st.markdown("---")
         st.markdown("### 3. Índices de Estabilidade e Fluidez Motora")
         
@@ -987,17 +957,13 @@ if st.session_state.processadores:
         
         def plot_grouped_bars(ax, dict_data, titulo, ylabel):
             labels_grupos = list(dict_data.keys())
-            # Calcula Média e DP para cada grupo
             means = [np.mean(dict_data[g]) if dict_data[g] else 0 for g in labels_grupos]
             stds = [np.std(dict_data[g]) if dict_data[g] else 0 for g in labels_grupos]
             
             x_pos = np.arange(len(labels_grupos))
-            # Cores consistentes: Azul para G1, Vermelho para G2
             cores = [cor_g1, cor_g2] if len(labels_grupos) > 1 else [cor_g1]
             
             bars = ax.bar(x_pos, means, yerr=stds, capsize=8, color=cores, edgecolor='black', alpha=0.9, width=0.6)
-            
-            # Adiciona os rótulos de valor no topo das barras
             ax.bar_label(bars, fmt='%.1f', padding=3, fontweight='bold')
             
             ax.set_xticks(x_pos)
@@ -1013,6 +979,7 @@ if st.session_state.processadores:
             plot_grouped_bars(axs_cav[1], cav_data['Joel_Torn'], "Variabilidade (CAV)\nJoel-Torn", "Graus (°)")
             plt.tight_layout()
             st.pyplot(fig_cav)
+            plt.close(fig_cav)
             
         with col_trans:
             fig_tr, axs_tr = plt.subplots(1, 2, figsize=(10, 5))
@@ -1020,6 +987,7 @@ if st.session_state.processadores:
             plot_grouped_bars(axs_tr[1], trans_data['Joel_Torn'], "Taxa de Transições\nJoel-Torn", "Mudanças / Ciclo")
             plt.tight_layout()
             st.pyplot(fig_tr)
+            plt.close(fig_tr)
 
     # =========================================================================
     # TAB 4: GERADOR DE GIFs
@@ -1054,20 +1022,17 @@ if st.session_state.processadores:
         st.subheader("Análise Estatística Avançada (Comparação)")
         grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
         
-        # 1. Definição das Cores Exclusivas para os Grupos
-        cor_g1 = '#a8c8f9' # Azul pastel (Grupo 1)
-        cor_g2 = '#f9a8a8' # Vermelho pastel (Grupo 2)
+        cor_g1 = '#a8c8f9'
+        cor_g2 = '#f9a8a8'
         cores_grupos = {grupos_estudo[0]: cor_g1}
         if len(grupos_estudo) > 1:
             cores_grupos[grupos_estudo[1]] = cor_g2
 
-        # 2. Dicionários que separam as variáveis
         v_vel = {g: [] for g in grupos_estudo}; v_ap_d = {g: [] for g in grupos_estudo}; v_ap_e = {g: [] for g in grupos_estudo}
         v_fc_d = {g: [] for g in grupos_estudo}; v_fc_e = {g: [] for g in grupos_estudo}
         v_ps_d = {g: [] for g in grupos_estudo}; v_ps_e = {g: [] for g in grupos_estudo}
         v_ps_norm_d = {g: [] for g in grupos_estudo}; v_ps_norm_e = {g: [] for g in grupos_estudo}
         
-
         for p in st.session_state.processadores:
             grp = p.grupo
             if not np.isnan(p.velocidade_media): v_vel[grp].append(p.velocidade_media)
@@ -1080,20 +1045,15 @@ if st.session_state.processadores:
             if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('D', np.nan)): v_ps_norm_d[grp].append(p.passo_norm['D'])
             if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('E', np.nan)): v_ps_norm_e[grp].append(p.passo_norm['E'])
 
-        # -------------------------------------------------------------
-        # PLOT 1: BOXPLOTS e COLUNAS (IMAGENS SEPARADAS E ESPAÇOSAS)
-        # -------------------------------------------------------------
         st.markdown("### 1. Parâmetros Espaço-Temporais")
 
         def gerar_colunas_passo_norm(dict_dados, titulo):
             fig, ax = plt.subplots(figsize=(8, 6))
             labels = list(dict_dados.keys())
             
-            # Calcula Média e Desvio Padrão
             means = [np.nanmean(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
             stds = [np.nanstd(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
             
-            # Define as cores baseadas no grupo (Azul para o primeiro, Vermelho para o segundo)
             cores = []
             for l in labels:
                 if grupos_estudo[0] in l: cores.append(cor_g1)
@@ -1101,7 +1061,6 @@ if st.session_state.processadores:
 
             bars = ax.bar(labels, means, yerr=stds, capsize=10, color=cores, edgecolor='black', alpha=0.8)
             
-            # Adiciona o bloco de texto com Média e DP em Porcentagem
             for i, bar in enumerate(bars):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + stds[i] + 1, 
                         f"Média: {means[i]:.0f}%\nDP: ±{stds[i]:.1f}%", 
@@ -1109,14 +1068,13 @@ if st.session_state.processadores:
 
             ax.set_title(titulo, fontweight='bold', fontsize=14)
             ax.set_ylabel("Porcentagem da Estatura (%)", fontsize=12)
-            ax.set_ylim(0, 100) # Escala de porcentagem travada
+            ax.set_ylim(0, 100) 
             ax.grid(axis='y', linestyle='--', alpha=0.5)
             plt.tight_layout()
             return fig
         
-        # Função para gerar um gráfico grande e isolado
         def gerar_boxplot_isolado(dict_dados, titulo, ylabel):
-            fig, ax = plt.subplots(figsize=(8, 6)) # Gráfico grande e proporcional
+            fig, ax = plt.subplots(figsize=(8, 6)) 
             labels = list(dict_dados.keys())
             dados_limpos = [dict_dados[l] for l in labels if len(dict_dados[l]) > 0]
             labels_limpos = [l for l in labels if len(dict_dados[l]) > 0]
@@ -1124,7 +1082,6 @@ if st.session_state.processadores:
             if dados_limpos:
                 bp = ax.boxplot(dados_limpos, patch_artist=True, labels=labels_limpos)
                 
-                # Aplica as cores correspondentes aos grupos (Azul ou Vermelho)
                 for i, patch in enumerate(bp['boxes']): 
                     grp_name = labels_limpos[i].split('(')[0] if '(' in labels_limpos[i] else labels_limpos[i]
                     cor = cores_grupos.get(grp_name, '#dddddd')
@@ -1132,14 +1089,12 @@ if st.session_state.processadores:
                     
                 for median in bp['medians']: median.set(color='black', linewidth=2)
                 
-                # Adiciona o texto Média/DP com bastante espaço (offset de 1.1)
                 for i, d in enumerate(dados_limpos):
                     media, dp, mediana = np.mean(d), np.std(d), np.median(d)
                     ax.text(i + 1.10, mediana, f"M: {media:.1f}\nDP: {dp:.1f}", 
                             ha='left', va='center', fontsize=10, fontweight='bold',
                             bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.3'))
                 
-                # Aumenta o eixo X agressivamente para caber a caixa de texto
                 ax.set_xlim(0.5, len(dados_limpos) + 0.9) 
                 ymin, ymax = ax.get_ylim()
                 ax.set_ylim(ymin - (ymax-ymin)*0.1, ymax + (ymax-ymin)*0.1)
@@ -1150,7 +1105,6 @@ if st.session_state.processadores:
             plt.tight_layout()
             return fig
 
-        # Montagem dos Dicionários
         dict_vel = {g: v_vel[g] for g in grupos_estudo}
         dict_ap = {}; dict_fc = {}; dict_ps = {}; dict_ps_norm = {}
         for g in grupos_estudo:
@@ -1159,33 +1113,33 @@ if st.session_state.processadores:
             dict_ps[f"{g}(D)"] = v_ps_d[g]; dict_ps[f"{g}(E)"] = v_ps_e[g]
             dict_ps_norm[f"{g}(D)"] = v_ps_norm_d[g]; dict_ps_norm[f"{g}(E)"] = v_ps_norm_e[g]
             
-        # Exibição em Grid para melhor visualização
         col_box1, col_box2 = st.columns(2)
         with col_box1:
-            st.pyplot(gerar_boxplot_isolado(dict_vel, "Velocidade Média", "m/s"))
-            st.pyplot(gerar_boxplot_isolado(dict_fc, "Foot Clearance", "mm"))
-        with col_box2:
-            st.pyplot(gerar_boxplot_isolado(dict_ap, "Fase de Apoio", "% do Ciclo"))
-            st.pyplot(gerar_boxplot_isolado(dict_ps, "Comprimento do Passo (Absoluto)", "mm"))
+            fig1 = gerar_boxplot_isolado(dict_vel, "Velocidade Média", "m/s")
+            st.pyplot(fig1); plt.close(fig1)
             
-        # --- CRIANDO A LINHA DE BAIXO PARA O PASSO NORMALIZADO ---
+            fig2 = gerar_boxplot_isolado(dict_fc, "Foot Clearance", "mm")
+            st.pyplot(fig2); plt.close(fig2)
+            
+        with col_box2:
+            fig3 = gerar_boxplot_isolado(dict_ap, "Fase de Apoio", "% do Ciclo")
+            st.pyplot(fig3); plt.close(fig3)
+            
+            fig4 = gerar_boxplot_isolado(dict_ps, "Comprimento do Passo (Absoluto)", "mm")
+            st.pyplot(fig4); plt.close(fig4)
+            
         st.markdown("---")
-        col_box3, col_box4 = st.columns(2) # <-- AQUI ESTÁ A CRIAÇÃO DA COLUNA 3!
-        
+        col_box3, col_box4 = st.columns(2)
         with col_box3:
-            st.pyplot(gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"))    
+            fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)")
+            st.pyplot(fig5); plt.close(fig5)
 
-
     # =========================================================================
-    # TAB 6: ESTATÍSTICA INFERENCIAL (COM SEPARAÇÃO APOIO / BALANÇO)
-    # =========================================================================
-    # =========================================================================
-    # TAB 6: ESTATÍSTICA (INTRA E ENTRE GRUPOS)
+    # TAB 6: ESTATÍSTICA INFERENCIAL
     # =========================================================================
     with tab6:
         st.subheader("🧪 Testes de Hipótese e Significância (Completo)")
         
-        # --- FLUXO DE PROCESSAMENTO ESTATÍSTICO ---
         with st.expander("🔍 Entenda o Fluxo de Decisão Estatística", expanded=True):
             st.markdown("""
             O sistema avalia os dados em **Duas Frentes**:
@@ -1210,9 +1164,7 @@ if st.session_state.processadores:
         else:
             st.info(f"Comparando: **{grupos[0]}** vs **{grupos[1]}**. Nível de significância: **α = 0.05**")
             
-            # 1. Variáveis Base (Agrupadas para rodar os lados D e E automaticamente)
             vars_base = [
-                # Label, Categoria, Key Base, Key Secundária, Início, Fim, É Bilateral?
                 ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, False),
                 ("Apoio (%)", 'fases', None, 'Apoio', None, None, True),
                 ("Clearance (mm)", 'clearance', None, None, None, None, True),
@@ -1226,7 +1178,6 @@ if st.session_state.processadores:
                 ("Torn Mín (°)", 'stats', 'Torn', 'min', None, None, True),
             ]
 
-            # 2. Geração Dinâmica das Variáveis de Coordenação por FASE (Bilateral)
             pares_coord_base = [('QJ', 'Quad_Joel'), ('JT', 'Joel_Torn')]
             padroes_coord = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
             
@@ -1238,7 +1189,6 @@ if st.session_state.processadores:
             resultados_intra = []
             resultados_entre = []
 
-            # 3. Motor de Extração e Estatística
             for label, cat, key1_base, key2, inicio, fim, is_bilateral in vars_base:
                 dados_g1 = {'D': [], 'E': [], 'M': [], 'Unico': []}
                 dados_g2 = {'D': [], 'E': [], 'M': [], 'Unico': []}
@@ -1284,10 +1234,9 @@ if st.session_state.processadores:
                                 target['D'].append(vd)
                                 target['E'].append(ve)
                                 target['M'].append((vd + ve) / 2)
-                    except:
+                    except Exception:
                         continue
 
-                # --- FRENTE A: INTRA-GRUPO (Assimetria) ---
                 if is_bilateral:
                     for g_idx, d_grp in enumerate([dados_g1, dados_g2]):
                         if len(d_grp['D']) > 2 and len(d_grp['E']) > 2:
@@ -1306,9 +1255,8 @@ if st.session_state.processadores:
                                     "Lado DIR (M)": f"{np.mean(d_grp['D']):.2f}", "Lado ESQ (M)": f"{np.mean(d_grp['E']):.2f}",
                                     "P-Value": f"{p_intra:.4f}", "Assimetria": "⚠️ SIM" if p_intra < 0.05 else "NÃO"
                                 })
-                            except: continue
+                            except Exception: continue
 
-                # --- FRENTE B: ENTRE-GRUPOS (Performance Bilateral) ---
                 arr_g1 = dados_g1['M'] if is_bilateral else dados_g1['Unico']
                 arr_g2 = dados_g2['M'] if is_bilateral else dados_g2['Unico']
 
@@ -1339,9 +1287,8 @@ if st.session_state.processadores:
                             "P-Value": f"{p_entre:.4f}", "Efeito": f"{abs(effect_size):.2f}",
                             "Resultado": "✅ SIGNIFICANTE" if p_entre < 0.05 else "❌ n.s."
                         })
-                    except: continue
+                    except Exception: continue
 
-            # 4. Renderização das Tabelas com Highlighting
             def highlight_sig(val):
                 return 'background-color: #d4edda;' if 'SIGNIFICANTE' in str(val) or 'SIM' in str(val) else ''
 
@@ -1376,7 +1323,6 @@ if st.session_state.processadores:
             st.markdown(f"Análise comparativa gerada entre o grupo base (**{g_controle}**) e o grupo de estudo (**{g_teste}**).")
             st.markdown("---")
             
-            # 1. Configuração de Variáveis e Categorias
             resultados_agrupados = {
                 'Espaço-Temporal': [], 'Cinemática': [], 'Coord. Apoio': [], 'Coord. Balanço': []
             }
@@ -1400,7 +1346,6 @@ if st.session_state.processadores:
                     vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True, 'Coord. Apoio'))
                     vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101, True, 'Coord. Balanço'))
 
-            # 2. Motor Estatístico Duplo e Gerador de Narrativa
             for label, cat, key1_base, key2, inicio, fim, is_bilateral, categoria in vars_base_relatorio:
                 dados_g1 = {'D': [], 'E': [], 'M': [], 'U': []}
                 dados_g2 = {'D': [], 'E': [], 'M': [], 'U': []}
@@ -1443,13 +1388,12 @@ if st.session_state.processadores:
                             
                             if not np.isnan(vd) and not np.isnan(ve):
                                 target['D'].append(vd); target['E'].append(ve); target['M'].append((vd + ve) / 2)
-                    except: continue
+                    except Exception: continue
 
                 houve_achado = False
                 texto_narrativo = f"**{label}**: "
                 texto_intra = ""
                 
-                # --- A) Lógica Narrativa Intra-grupo ---
                 if is_bilateral:
                     achou_intra = False
                     for i, (g_nome, d_grp) in enumerate([(g_controle, dados_g1), (g_teste, dados_g2)]):
@@ -1481,7 +1425,6 @@ if st.session_state.processadores:
                     if achou_intra:
                         texto_narrativo += texto_intra + ". "
 
-                # --- B) Lógica Narrativa Entre-grupos ---
                 arr_g1 = dados_g1['M'] if is_bilateral else dados_g1['U']
                 arr_g2 = dados_g2['M'] if is_bilateral else dados_g2['U']
                 
@@ -1507,7 +1450,6 @@ if st.session_state.processadores:
                 if houve_achado:
                     resultados_agrupados[categoria].append(texto_narrativo)
 
-            # 3. Renderização Categorizada
             categorias_nomenclatura = [
                 ('Espaço-Temporal', "### 🚶 Parâmetros Espaço-Temporais"),
                 ('Cinemática', "### 📐 Cinemática Articular (Amplitudes)"),
@@ -1523,12 +1465,7 @@ if st.session_state.processadores:
                 else: 
                     st.write("*Nenhuma diferença clinicamente significativa (Intra ou Entre grupos) detectada nesta categoria.*")
                 st.write("")
-
-            # =================================================================
-            # O RESTANTE ABAIXO FOI MANTIDO EXATAMENTE COMO VOCÊ CONFIGUROU
-            # =================================================================
             
-            # --- SEÇÃO DE ASSIMETRIA CLÍNICA ---
             st.markdown("### ⚖️ Análise de Assimetria e Dominância")
             
             variaveis_ia = ['Passo', 'Apoio', 'Clearance']
@@ -1540,18 +1477,15 @@ if st.session_state.processadores:
                 ia_g1 = [p.indices_assimetria.get(var, np.nan) for p in st.session_state.processadores if p.grupo == g_controle]
                 ia_g2 = [p.indices_assimetria.get(var, np.nan) for p in st.session_state.processadores if p.grupo == g_teste]
                 
-                # Limpa NaNs
                 ia_g1 = [x for x in ia_g1 if not np.isnan(x)]
                 ia_g2 = [x for x in ia_g2 if not np.isnan(x)]
 
                 if len(ia_g1) > 2 and len(ia_g2) > 2:
-                    # Compara a magnitude da assimetria entre os grupos
                     _, p_val = sp_stats.mannwhitneyu(ia_g1, ia_g2)
                     
                     media_ia_c = np.mean(ia_g1)
                     media_ia_t = np.mean(ia_g2)
                     
-                    # Define um limiar clínico de assimetria (ex: > 10%)
                     assimetricos_c = sum(1 for x in ia_g1 if x > 10)
                     assimetricos_t = sum(1 for x in ia_g2 if x > 10)
                     
@@ -1562,7 +1496,6 @@ if st.session_state.processadores:
                         razao = media_ia_t / media_ia_c if media_ia_c > 0 else 0
                         achados_assimetria.append(f"🔴 **{var}**: Índice de Simetria (SI) significativamente alterado no grupo {g_teste} (*p={p_val:.3f}*). A magnitude da assimetria bilateral, calculada pelo método de Robinson et al. (1987), é **{razao:.1f}x maior** que no grupo Controle ({media_ia_t:.1f}% vs {media_ia_c:.1f}%).")
 
-            # Resumo Narrativo Final
             if contagem_parkinson > 0:
                 frequencia_relativa = contagem_parkinson / max(contagem_controle, 1)
                 st.write(f"Nesta amostra, a assimetria clínica é **{frequencia_relativa:.1f} vezes mais frequente** no grupo {g_teste} do que no grupo {g_controle}. As variáveis com maior desequilíbrio bilateral detectado foram:")
@@ -1571,7 +1504,6 @@ if st.session_state.processadores:
             else:
                 st.write("Não foram detectadas assimetrias clinicamente significativas entre os grupos.")
 
-        
             st.markdown("---")
             st.markdown("### 📚 Referências Metodológicas (Engine do Software)")
             st.markdown("""
