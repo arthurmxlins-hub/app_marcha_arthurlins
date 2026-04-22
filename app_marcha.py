@@ -52,8 +52,8 @@ class ProcessadorCinematico:
             self.dados = self._filtrar_e_inverter()
             
             # --- MOTORES CINEMÁTICOS ---
-            self.angulos_df = self._calcular_angulos() # Cinemática Articular Relativa (Amplitudes)
-            self.segmentos_df = self._calcular_angulos_segmentares() # Cinemática Segmentar Absoluta (Vector Coding)
+            self.angulos_df = self._calcular_angulos() 
+            self.segmentos_df = self._calcular_angulos_segmentares() 
             
             self.velocidade_media = self._calcular_velocidade_sacrum()
             self.eventos = self.detectar_eventos_zeni()
@@ -268,7 +268,7 @@ class ProcessadorCinematico:
         return ciclos
 
     def _calcular_coordenacao_vetorial(self):
-        res = {par: {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan} for par in ['Quad_Joel_D', 'Quad_Joel_E', 'Joel_Torn_D', 'Joel_Torn_E']}
+        res = {}
         self.coord_vetorial_series = {} 
         
         for lado in ['D', 'E']:
@@ -276,17 +276,24 @@ class ProcessadorCinematico:
             if len(hss) < 2: 
                 continue
             
-            pares_segmentares = [
-                (f'Quad_Joel_{lado}', f'Coxa_{lado}', f'Perna_{lado}'),
-                (f'Joel_Torn_{lado}', f'Perna_{lado}', f'Pe_{lado}')
+            # --- MOTOR DUPLO (ARTICULAR E SEGMENTAR) ---
+            pares_articulares = [
+                (f'Quad_Joel_{lado}', f'Quad_{lado}', f'Joel_{lado}', self.angulos_df),
+                (f'Joel_Torn_{lado}', f'Joel_{lado}', f'Torn_{lado}', self.angulos_df)
             ]
             
-            for nome_par, col_prox, col_dist in pares_segmentares:
-                c_prox = self.extrair_ciclos_normalizados(self.segmentos_df[col_prox].values, hss)
-                c_dist = self.extrair_ciclos_normalizados(self.segmentos_df[col_dist].values, hss)
+            pares_segmentares = [
+                (f'Coxa_Perna_{lado}', f'Coxa_{lado}', f'Perna_{lado}', self.segmentos_df),
+                (f'Perna_Pe_{lado}', f'Perna_{lado}', f'Pe_{lado}', self.segmentos_df)
+            ]
+            
+            for nome_par, col_prox, col_dist, df_ref in pares_articulares + pares_segmentares:
+                c_prox = self.extrair_ciclos_normalizados(df_ref[col_prox].values, hss)
+                c_dist = self.extrair_ciclos_normalizados(df_ref[col_dist].values, hss)
                 if not c_prox or not c_dist: 
                     continue
                 
+                res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
                 
                 for cp, cd in zip(c_prox, c_dist):
@@ -444,11 +451,11 @@ class GeradorVisual:
         def format_f(c): 
             return f" Proximal : {c.get('Proximal',0):>3.0f}%\n Em Fase  : {c.get('EmFase',0):>3.0f}%\n Distal   : {c.get('Distal',0):>3.0f}%\n Anti-Fase: {c.get('AntiFase',0):>3.0f}%"
         
-        col_dir = ">> COXA-PERNA (DIR)\n" + format_f(coord_norm.get('Quad_Joel_D', {})) + "\n\n"
-        col_dir += ">> PERNA-PÉ (DIR)\n" + format_f(coord_norm.get('Joel_Torn_D', {}))
+        col_dir = ">> COXA-PERNA (DIR)\n" + format_f(coord_norm.get('Coxa_Perna_D', {})) + "\n\n"
+        col_dir += ">> PERNA-PÉ (DIR)\n" + format_f(coord_norm.get('Perna_Pe_D', {}))
         
-        col_esq = ">> COXA-PERNA (ESQ)\n" + format_f(coord_norm.get('Quad_Joel_E', {})) + "\n\n"
-        col_esq += ">> PERNA-PÉ (ESQ)\n" + format_f(coord_norm.get('Joel_Torn_E', {}))
+        col_esq = ">> COXA-PERNA (ESQ)\n" + format_f(coord_norm.get('Coxa_Perna_E', {})) + "\n\n"
+        col_esq += ">> PERNA-PÉ (ESQ)\n" + format_f(coord_norm.get('Perna_Pe_E', {}))
 
         ax_stats_left.text(0.00, 0.85, col_dir, va='top', fontsize=9, family='monospace')
         ax_stats_left.text(0.55, 0.85, col_esq, va='top', fontsize=9, family='monospace')
@@ -616,7 +623,7 @@ if st.session_state.processadores:
 
     with tab1:
         st.subheader("📊 Tabela de Dados Brutos e Estatística Descritiva")
-        st.write("Visão geral de todos os parâmetros. Ao final da tabela, são apresentadas as médias e desvios padrão de cada grupo.")
+        st.write("Visão geral de todos os parâmetros.")
         dados_tabela = []
         for p in st.session_state.processadores:
             try:
@@ -639,17 +646,23 @@ if st.session_state.processadores:
                         linha[f"{art} Máx (°)"] = stats.get(art, {}).get('max', np.nan)
                         linha[f"{art} Mín (°)"] = stats.get(art, {}).get('min', np.nan)
 
-                pares_coord = [('QJ_DIR', 'Quad_Joel_D'), ('QJ_ESQ', 'Quad_Joel_E'), ('JT_DIR', 'Joel_Torn_D'), ('JT_ESQ', 'Joel_Torn_E')]
+                pares_coord_tab1 = [
+                    ('Artic_QJ_DIR', 'Quad_Joel_D', 'angulos_df'), ('Artic_QJ_ESQ', 'Quad_Joel_E', 'angulos_df'),
+                    ('Artic_JT_DIR', 'Joel_Torn_D', 'angulos_df'), ('Artic_JT_ESQ', 'Joel_Torn_E', 'angulos_df'),
+                    ('Segm_CP_DIR', 'Coxa_Perna_D', 'segmentos_df'), ('Segm_CP_ESQ', 'Coxa_Perna_E', 'segmentos_df'),
+                    ('Segm_PP_DIR', 'Perna_Pe_D', 'segmentos_df'), ('Segm_PP_ESQ', 'Perna_Pe_E', 'segmentos_df')
+                ]
                 padroes = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
 
-                for par_label, par_key in pares_coord:
+                for par_label, par_key, nome_df in pares_coord_tab1:
                     try:
                         prox_name, dist_name, lado = par_key.split('_')[0], par_key.split('_')[1], par_key.split('_')[2]
                         hss = p.eventos[lado]['HS']
+                        df_obj = getattr(p, nome_df)
                         
                         if len(hss) > 1:
-                            c_prox = p.extrair_ciclos_normalizados(p.segmentos_df[f"Coxa_{lado}" if 'Quad' in prox_name else f"Perna_{lado}"].values, hss)
-                            c_dist = p.extrair_ciclos_normalizados(p.segmentos_df[f"Perna_{lado}" if 'Joel' in dist_name else f"Pe_{lado}"].values, hss)
+                            c_prox = p.extrair_ciclos_normalizados(df_obj[f"{prox_name}_{lado}"].values, hss)
+                            c_dist = p.extrair_ciclos_normalizados(df_obj[f"{dist_name}_{lado}"].values, hss)
                             
                             if len(c_prox) > 0 and len(c_dist) > 0:
                                 arr_p, arr_d = np.array(c_prox), np.array(c_dist)
@@ -767,52 +780,49 @@ if st.session_state.processadores:
                 plt.close(fig)
 
     with tab3:
-        st.subheader("⚙️ Coordenação Vetorial e Controle Motor (Base Segmentar)")
-        with st.expander("📖 Dicionário Clínico: Padrão Ouro de Coordenação", expanded=False):
-            st.markdown("""
-            O **Vector Coding Segmentar** avalia os ângulos absolutos da Coxa, Perna e Pé na gravidade.
-            **1. Frequência dos Padrões (Gráfico de Barras):**
-            * <span style='color:#e74c3c'>**Dominância Proximal (Vermelho):**</span> Segmento superior guia o movimento (ex: Coxa move, Perna acompanha).
-            * <span style='color:#2ecc71'>**Em Fase (Verde):**</span> Ambos giram na mesma direção. Movimento harmonioso.
-            * <span style='color:#3498db'>**Dominância Distal (Azul):**</span> Segmento inferior (ex: Perna ou Pé) guia o movimento.
-            * <span style='color:#f1c40f'>**Anti-Fase (Amarelo):**</span> Giram em direções opostas.
-            
-            **2. Métricas de Estabilidade:**
-            * **Variabilidade (CAV):** Mede a instabilidade ou rigidez das articulações baseadas em seus segmentos de ligação.
-            * **Taxa de Transições:** Fluidez neuromuscular para evitar quedas.
-            """, unsafe_allow_html=True)
+        st.subheader("⚙️ Coordenação Vetorial e Controle Motor")
+        tipo_coord = st.radio("Selecione o Modelo de Análise Biomecânica:", 
+                              ["📐 Coordenação Segmentar (Absoluta - Padrão Ouro)", "📍 Coordenação Articular (Relativa)"], 
+                              horizontal=True)
+        
+        if "Segmentar" in tipo_coord:
+            pares_map = [('Coxa_Perna_D', 'Coxa-Perna (DIR)'), ('Coxa_Perna_E', 'Coxa-Perna (ESQ)'), ('Perna_Pe_D', 'Perna-Pé (DIR)'), ('Perna_Pe_E', 'Perna-Pé (ESQ)')]
+            label_prox_1, label_dist_1 = 'Coxa', 'Perna'
+            label_prox_2, label_dist_2 = 'Perna', 'Pe'
+            label_cav_1, label_cav_2 = 'Coxa_Perna', 'Perna_Pe'
+            df_ref = 'segmentos_df'
+        else:
+            pares_map = [('Quad_Joel_D', 'Quad-Joel (DIR)'), ('Quad_Joel_E', 'Quad-Joel (ESQ)'), ('Joel_Torn_D', 'Joel-Torn (DIR)'), ('Joel_Torn_E', 'Joel-Torn (ESQ)')]
+            label_prox_1, label_dist_1 = 'Quad', 'Joel'
+            label_prox_2, label_dist_2 = 'Joel', 'Torn'
+            label_cav_1, label_cav_2 = 'Quad_Joel', 'Joel_Torn'
+            df_ref = 'angulos_df'
 
         st.markdown("---")
         grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
         cor_g1, cor_g2 = '#a8c8f9', '#f9a8a8'
         padroes = {'Proximal': '#e74c3c', 'EmFase': '#2ecc71', 'Distal': '#3498db', 'AntiFase': '#f1c40f'}
 
-        dados_coord = {g: { 'Quad_Joel_D': [], 'Quad_Joel_E': [], 'Joel_Torn_D': [], 'Joel_Torn_E': [] } for g in grupos_estudo}
-        freq_acumulada = {g: { 'Coxa-Perna (DIR)': {k: [] for k in padroes}, 'Coxa-Perna (ESQ)': {k: [] for k in padroes},
-                               'Perna-Pé (DIR)': {k: [] for k in padroes}, 'Perna-Pé (ESQ)': {k: [] for k in padroes} } for g in grupos_estudo}
-        cav_data = {'Quad_Joel': {g: [] for g in grupos_estudo}, 'Joel_Torn': {g: [] for g in grupos_estudo}}
-        trans_data = {'Quad_Joel': {g: [] for g in grupos_estudo}, 'Joel_Torn': {g: [] for g in grupos_estudo}}
+        freq_acumulada = {g: {c_new: {k: [] for k in padroes} for _, c_new in pares_map} for g in grupos_estudo}
+        cav_data = {label_cav_1: {g: [] for g in grupos_estudo}, label_cav_2: {g: [] for g in grupos_estudo}}
+        trans_data = {label_cav_1: {g: [] for g in grupos_estudo}, label_cav_2: {g: [] for g in grupos_estudo}}
 
         for p in st.session_state.processadores:
             grp = p.grupo
-            map_coord = [('Quad_Joel_D', 'Coxa-Perna (DIR)'), ('Quad_Joel_E', 'Coxa-Perna (ESQ)'),
-                         ('Joel_Torn_D', 'Perna-Pé (DIR)'), ('Joel_Torn_E', 'Perna-Pé (ESQ)')]
-            for c_old, c_new in map_coord:
+            for c_old, c_new in pares_map:
                 freqs = p.coord_vetorial.get(c_old, {})
                 for k in padroes.keys():
                     if not np.isnan(freqs.get(k, np.nan)): 
                         freq_acumulada[grp][c_new][k].append(freqs[k])
 
-            for prox, dist, label_cav in [('Coxa', 'Perna', 'Quad_Joel'), ('Perna', 'Pe', 'Joel_Torn')]:
+            for prox, dist, label_cav in [(label_prox_1, label_dist_1, label_cav_1), (label_prox_2, label_dist_2, label_cav_2)]:
                 for lado in ['D', 'E']:
                     chave_prox, chave_dist = f"{prox}_{lado}", f"{dist}_{lado}"
-                    chave_par = f"Quad_Joel_{lado}" if 'Coxa' in prox else f"Joel_Torn_{lado}"
-                    
                     hss = p.eventos[lado]['HS']
                     if len(hss) > 1:
-                        c_prox = p.extrair_ciclos_normalizados(p.segmentos_df[chave_prox].values, hss)
-                        c_dist = p.extrair_ciclos_normalizados(p.segmentos_df[chave_dist].values, hss)
-                        dados_coord[grp][chave_par].extend((c_prox, c_dist))
+                        df_obj = getattr(p, df_ref)
+                        c_prox = p.extrair_ciclos_normalizados(df_obj[chave_prox].values, hss)
+                        c_dist = p.extrair_ciclos_normalizados(df_obj[chave_dist].values, hss)
                         
                         if len(c_prox) > 0 and len(c_dist) > 0:
                             arr_p, arr_d = np.array(c_prox), np.array(c_dist)
@@ -827,28 +837,29 @@ if st.session_state.processadores:
                             x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
                             cav_data[label_cav][grp].append(np.mean(np.sqrt(2 * (1 - np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1))) * (180 / np.pi)))
 
-        st.markdown("### 1. Comportamento Espacial Segmentar (Diagramas Angle-Angle)")
+        st.markdown("### 1. Comportamento Espacial (Diagramas Angle-Angle)")
         cols_t3 = st.columns(len(grupos_estudo))
 
         for idx, grp in enumerate(grupos_estudo):
             with cols_t3[idx]:
                 st.markdown(f"<h4 style='text-align:center; color: #555;'>Grupo: {grp}</h4>", unsafe_allow_html=True)
                 procs_grp = [p for p in st.session_state.processadores if p.grupo == grp]
-                dados_grp = { 'Coxa_D': [], 'Perna_D': [], 'Pe_D': [], 'Coxa_E': [], 'Perna_E': [], 'Pe_E': [] }
+                dados_grp = { f'{label_prox_1}_D': [], f'{label_dist_1}_D': [], f'{label_dist_2}_D': [], f'{label_prox_1}_E': [], f'{label_dist_1}_E': [], f'{label_dist_2}_E': [] }
                 
                 for proc in procs_grp:
-                    for joint in ['Coxa', 'Perna', 'Pe']:
+                    for joint in [label_prox_1, label_dist_1, label_dist_2]:
                         for lado in ['D', 'E']:
                             chave = f"{joint}_{lado}"
-                            ciclos = proc.extrair_ciclos_normalizados(proc.segmentos_df[chave].values, proc.eventos[lado]['HS'])
+                            df_obj = getattr(proc, df_ref)
+                            ciclos = proc.extrair_ciclos_normalizados(df_obj[chave].values, proc.eventos[lado]['HS'])
                             dados_grp[chave].extend(ciclos)
 
                 fig_coord, axs_coord = plt.subplots(2, 2, figsize=(7, 7))
                 pares_plot = [
-                    (axs_coord[0, 0], 'D', 'Coxa', 'Perna', 'Seg. Coxa(°)', 'Seg. Perna(°)'),
-                    (axs_coord[0, 1], 'E', 'Coxa', 'Perna', 'Seg. Coxa(°)', 'Seg. Perna(°)'),
-                    (axs_coord[1, 0], 'D', 'Perna', 'Pe', 'Seg. Perna(°)', 'Seg. Pé(°)'),
-                    (axs_coord[1, 1], 'E', 'Perna', 'Pe', 'Seg. Perna(°)', 'Seg. Pé(°)')
+                    (axs_coord[0, 0], 'D', label_prox_1, label_dist_1, f'{label_prox_1}(°)', f'{label_dist_1}(°)'),
+                    (axs_coord[0, 1], 'E', label_prox_1, label_dist_1, f'{label_prox_1}(°)', f'{label_dist_1}(°)'),
+                    (axs_coord[1, 0], 'D', label_prox_2, label_dist_2, f'{label_prox_2}(°)', f'{label_dist_2}(°)'),
+                    (axs_coord[1, 1], 'E', label_prox_2, label_dist_2, f'{label_prox_2}(°)', f'{label_dist_2}(°)')
                 ]
 
                 for ax, lado, prox, dist, label_x, label_y in pares_plot:
@@ -882,8 +893,7 @@ if st.session_state.processadores:
                     m_prox, m_fase, m_dist, m_anti = [], [], [], []
 
                     for par in labels_pares:
-                        chave_par_interna = "Quad_Joel" if "Coxa" in par else "Joel_Torn"
-                        chave_par_interna += "_D" if "DIR" in par else "_E"
+                        chave_par_interna = next(old for old, new in pares_map if new == par)
                         f_prox, f_fase, f_dist, f_anti = 0, 0, 0, 0
                         contagem = 0
                         
@@ -955,16 +965,16 @@ if st.session_state.processadores:
 
         with col_cav:
             fig_cav, axs_cav = plt.subplots(1, 2, figsize=(10, 5))
-            plot_grouped_bars(axs_cav[0], cav_data['Quad_Joel'], "Variabilidade (CAV)\nCoxa-Perna", "Graus (°)")
-            plot_grouped_bars(axs_cav[1], cav_data['Joel_Torn'], "Variabilidade (CAV)\nPerna-Pé", "Graus (°)")
+            plot_grouped_bars(axs_cav[0], cav_data[label_cav_1], f"Variabilidade (CAV)\n{label_prox_1}-{label_dist_1}", "Graus (°)")
+            plot_grouped_bars(axs_cav[1], cav_data[label_cav_2], f"Variabilidade (CAV)\n{label_prox_2}-{label_dist_2}", "Graus (°)")
             plt.tight_layout()
             st.pyplot(fig_cav)
             plt.close(fig_cav)
             
         with col_trans:
             fig_tr, axs_tr = plt.subplots(1, 2, figsize=(10, 5))
-            plot_grouped_bars(axs_tr[0], trans_data['Quad_Joel'], "Taxa de Transições\nCoxa-Perna", "Mudanças / Ciclo")
-            plot_grouped_bars(axs_tr[1], trans_data['Joel_Torn'], "Taxa de Transições\nPerna-Pé", "Mudanças / Ciclo")
+            plot_grouped_bars(axs_tr[0], trans_data[label_cav_1], f"Taxa de Transições\n{label_prox_1}-{label_dist_1}", "Mudanças / Ciclo")
+            plot_grouped_bars(axs_tr[1], trans_data[label_cav_2], f"Taxa de Transições\n{label_prox_2}-{label_dist_2}", "Mudanças / Ciclo")
             plt.tight_layout()
             st.pyplot(fig_tr)
             plt.close(fig_tr)
@@ -1134,7 +1144,10 @@ if st.session_state.processadores:
                 ("Torn Mín (°)", 'stats', 'Torn', 'min', None, None, True),
             ]
 
-            pares_coord_base = [('QJ', 'Quad_Joel'), ('JT', 'Joel_Torn')]
+            pares_coord_base = [
+                ('Art. QJ', 'Quad_Joel'), ('Art. JT', 'Joel_Torn'),
+                ('Seg. CP', 'Coxa_Perna'), ('Seg. PP', 'Perna_Pe')
+            ]
             for par_label, par_key in pares_coord_base:
                 for padrao in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
                     vars_base.append((f"APOIO {par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True))
@@ -1261,7 +1274,12 @@ if st.session_state.processadores:
             st.markdown(f"Análise comparativa gerada entre o grupo base (**{g_controle}**) e o grupo de estudo (**{g_teste}**).")
             st.markdown("---")
             
-            resultados_agrupados = {'Espaço-Temporal': [], 'Cinemática': [], 'Coord. Apoio': [], 'Coord. Balanço': []}
+            resultados_agrupados = {
+                'Espaço-Temporal': [], 'Cinemática': [], 
+                'Coord. Apoio (Articular)': [], 'Coord. Balanço (Articular)': [],
+                'Coord. Apoio (Segmentar)': [], 'Coord. Balanço (Segmentar)': []
+            }
+            
             vars_base_relatorio = [
                 ("Velocidade (m/s)", 'attr', 'velocidade_media', None, None, None, False, 'Espaço-Temporal'),
                 ("Apoio (%)", 'fases', None, 'Apoio', None, None, True, 'Espaço-Temporal'),
@@ -1275,10 +1293,17 @@ if st.session_state.processadores:
                 ("Torn Mín (°)", 'stats', 'Torn', 'min', None, None, True, 'Cinemática'),
             ]
 
-            for par_label, par_key in [('QJ', 'Quad_Joel'), ('JT', 'Joel_Torn')]:
+            pares_coord_base_relatorio = [
+                ('Art. QJ', 'Quad_Joel', False), ('Art. JT', 'Joel_Torn', False),
+                ('Seg. CP', 'Coxa_Perna', True), ('Seg. PP', 'Perna_Pe', True)
+            ]
+            
+            for par_label, par_key, is_seg in pares_coord_base_relatorio:
+                cat_apoio = 'Coord. Apoio (Segmentar)' if is_seg else 'Coord. Apoio (Articular)'
+                cat_balanco = 'Coord. Balanço (Segmentar)' if is_seg else 'Coord. Balanço (Articular)'
                 for padrao in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
-                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True, 'Coord. Apoio'))
-                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101, True, 'Coord. Balanço'))
+                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 0, 60, True, cat_apoio))
+                    vars_base_relatorio.append((f"{par_label}: {padrao} (%)", 'coord_fase', par_key, padrao, 60, 101, True, cat_balanco))
 
             for label, cat, key1_base, key2, inicio, fim, is_bilateral, categoria in vars_base_relatorio:
                 dados_g1, dados_g2 = {'D': [], 'E': [], 'M': [], 'U': []}, {'D': [], 'E': [], 'M': [], 'U': []}
@@ -1326,27 +1351,29 @@ if st.session_state.processadores:
                     achou_intra = False
                     for i, (g_nome, d_grp) in enumerate([(g_controle, dados_g1), (g_teste, dados_g2)]):
                         if len(d_grp['D']) > 2 and len(d_grp['E']) > 2:
-                            _, p_nd = sp_stats.shapiro(d_grp['D'])
-                            _, p_ne = sp_stats.shapiro(d_grp['E'])
-                            if p_nd > 0.05 and p_ne > 0.05: 
-                                _, p_intra = sp_stats.ttest_rel(d_grp['D'], d_grp['E'])
-                            else: 
-                                _, p_intra = sp_stats.wilcoxon(d_grp['D'], d_grp['E'])
-                                
-                            if p_intra < 0.05:
-                                dir_val, esq_val = np.mean(d_grp['D']), np.mean(d_grp['E'])
-                                direcao = "redução" if dir_val < esq_val else "aumento"
-                                if i == 0: 
-                                    texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do lado direito em relação ao esquerdo (*p={p_intra:.3f}*)"
+                            try:
+                                _, p_nd = sp_stats.shapiro(d_grp['D'])
+                                _, p_ne = sp_stats.shapiro(d_grp['E'])
+                                if p_nd > 0.05 and p_ne > 0.05: 
+                                    _, p_intra = sp_stats.ttest_rel(d_grp['D'], d_grp['E'])
+                                else: 
+                                    _, p_intra = sp_stats.wilcoxon(d_grp['D'], d_grp['E'])
+                                    
+                                if p_intra < 0.05:
+                                    dir_val, esq_val = np.mean(d_grp['D']), np.mean(d_grp['E'])
+                                    direcao = "redução" if dir_val < esq_val else "aumento"
+                                    if i == 0: 
+                                        texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do lado direito em relação ao esquerdo (*p={p_intra:.3f}*)"
+                                    else:
+                                        if achou_intra: 
+                                            texto_intra += f", e o grupo **{g_nome}** também apresentou {direcao} (*p={p_intra:.3f}*)"
+                                        else: 
+                                            texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do lado direito (*p={p_intra:.3f}*), enquanto o grupo **{g_controle}** não apresentou assimetria"
+                                    achou_intra, houve_achado = True, True
                                 else:
-                                    if achou_intra: 
-                                        texto_intra += f", e o grupo **{g_nome}** também apresentou {direcao} (*p={p_intra:.3f}*)"
-                                    else: 
-                                        texto_intra += f"O grupo **{g_nome}** apresentou {direcao} do lado direito (*p={p_intra:.3f}*), enquanto o grupo **{g_controle}** não apresentou assimetria"
-                                achou_intra, houve_achado = True, True
-                            else:
-                                if i == 1 and achou_intra: 
-                                    texto_intra += f", enquanto o grupo **{g_nome}** não apresentou assimetria"
+                                    if i == 1 and achou_intra: 
+                                        texto_intra += f", enquanto o grupo **{g_nome}** não apresentou assimetria"
+                            except Exception: pass
                     if achou_intra: 
                         texto_narrativo += texto_intra + ". "
 
@@ -1354,28 +1381,34 @@ if st.session_state.processadores:
                 arr_g2 = dados_g2['M'] if is_bilateral else dados_g2['U']
                 
                 if len(arr_g1) > 2 and len(arr_g2) > 2:
-                    _, p_norm1 = sp_stats.shapiro(arr_g1)
-                    _, p_norm2 = sp_stats.shapiro(arr_g2)
-                    if p_norm1 > 0.05 and p_norm2 > 0.05:
-                        _, p_lev = sp_stats.levene(arr_g1, arr_g2)
-                        _, p_entre = sp_stats.ttest_ind(arr_g1, arr_g2, equal_var=(p_lev > 0.05))
-                    else: 
-                        _, p_entre = sp_stats.mannwhitneyu(arr_g1, arr_g2, alternative='two-sided')
-                        
-                    if p_entre < 0.05:
-                        m1, m2 = np.mean(arr_g1), np.mean(arr_g2)
-                        diff_tipo = "superior" if m2 > m1 else "inferior"
-                        prefixo_entre = "Ademais, na comparação entre grupos" if houve_achado else "Na comparação entre grupos"
-                        base_txt = "avaliando a média bilateral" if is_bilateral else "avaliando o valor global"
-                        texto_narrativo += f"{prefixo_entre} ({base_txt}), o grupo **{g_teste}** apresentou performance **{diff_tipo}** em relação ao grupo **{g_controle}** (*p={p_entre:.3f}*)."
-                        houve_achado = True
+                    try:
+                        _, p_norm1 = sp_stats.shapiro(arr_g1)
+                        _, p_norm2 = sp_stats.shapiro(arr_g2)
+                        if p_norm1 > 0.05 and p_norm2 > 0.05:
+                            _, p_lev = sp_stats.levene(arr_g1, arr_g2)
+                            _, p_entre = sp_stats.ttest_ind(arr_g1, arr_g2, equal_var=(p_lev > 0.05))
+                        else: 
+                            _, p_entre = sp_stats.mannwhitneyu(arr_g1, arr_g2, alternative='two-sided')
+                            
+                        if p_entre < 0.05:
+                            m1, m2 = np.mean(arr_g1), np.mean(arr_g2)
+                            diff_tipo = "superior" if m2 > m1 else "inferior"
+                            prefixo_entre = "Ademais, na comparação entre grupos" if houve_achado else "Na comparação entre grupos"
+                            base_txt = "avaliando a média bilateral" if is_bilateral else "avaliando o valor global"
+                            texto_narrativo += f"{prefixo_entre} ({base_txt}), o grupo **{g_teste}** apresentou performance **{diff_tipo}** em relação ao grupo **{g_controle}** (*p={p_entre:.3f}*)."
+                            houve_achado = True
+                    except Exception: pass
 
                 if houve_achado: 
                     resultados_agrupados[categoria].append(texto_narrativo)
 
             categorias_nomenclatura = [
-                ('Espaço-Temporal', "### 🚶 Parâmetros Espaço-Temporais"), ('Cinemática', "### 📐 Cinemática Articular (Amplitudes)"),
-                ('Coord. Apoio', "### 🦵 Coordenação na Fase de Apoio (0-60%)"), ('Coord. Balanço', "### ✈️ Coordenação na Fase de Balanço (60-100%)")
+                ('Espaço-Temporal', "### 🚶 Parâmetros Espaço-Temporais"),
+                ('Cinemática', "### 📐 Cinemática Articular (Amplitudes)"),
+                ('Coord. Apoio (Articular)', "### 🦵 Coordenação Articular no Apoio (0-60%)"),
+                ('Coord. Balanço (Articular)', "### ✈️ Coordenação Articular no Balanço (60-100%)"),
+                ('Coord. Apoio (Segmentar)', "### 🦵 Coordenação Segmentar no Apoio (0-60%)"),
+                ('Coord. Balanço (Segmentar)', "### ✈️ Coordenação Segmentar no Balanço (60-100%)")
             ]
 
             for chave, titulo in categorias_nomenclatura:
@@ -1414,7 +1447,7 @@ if st.session_state.processadores:
             st.markdown("""
             1. **Índice de Simetria (SI):** *ROBINSON, R. O.; HERZOG, W.; NIGG, B. M. Use of force platform variables to quantify the effects of chiropractic manipulation on gait symmetry. Journal of Prosthetic and Orthotics, v. 11, n. 4, p. 172-176, 1987.*
             2. **Detecção Cinemática de Eventos da Marcha:** *ZENI, J. A.; RICHARDS, J. G.; HIGGINSON, J. S. Two simple methods for determining gait events during treadmill and overground walking using kinematic data. Gait & Posture, v. 27, n. 4, p. 710-714, 2008.*
-            3. **Coordenação Vetorial Segmentar:** *TEPAVAC, D.; FIELD-FOTE, E. C. Vector coding: a technique for quantification of inter-joint coordination. Journal of Biomechanics, v. 34, n. 1, p. 118-120, 2001.*
+            3. **Coordenação Vetorial (Angle-Angle e Vector Coding):** *TEPAVAC, D.; FIELD-FOTE, E. C. Vector coding: a technique for quantification of inter-joint coordination. Journal of Biomechanics, v. 34, n. 1, p. 118-120, 2001.*
             4. **Estatística Inferencial (Decisão Automática):** *SHAPIRO, S. S.; WILK, M. B. An analysis of variance test for normality (complete samples). Biometrika, v. 52, n. 3/4, p. 591-611, 1965.*
             """)
             if st.button("🖨️ Preparar Relatório para Impressão (Ctrl+P)", use_container_width=True): 
