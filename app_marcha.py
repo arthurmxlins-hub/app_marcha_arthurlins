@@ -616,9 +616,9 @@ if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width
         st.success(f"✅ {len(st.session_state.processadores)} arquivos processados e agrupados com sucesso!")
 
 if st.session_state.processadores:
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Tabela de Médias", "📈 Gráficos de Curvas", "⚙️ Coordenação (Angle-Angle)", 
-        "🎥 Animações 3D (GIFs)", "📦 Estatística (Boxplots e Barras)", "🧪 Testes de Hipótese", "📝 Relatório Clínico"
+        "🎥 Animações 3D (GIFs)", "📦 Estatística (Boxplots e Barras)",
     ])
 
     with tab1:
