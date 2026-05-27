@@ -22,14 +22,21 @@ st.set_page_config(page_title="GPBIO - Biomecânica Clínica", layout="wide", pa
 # =============================================================================
 # ENGINE MATEMÁTICA E SEGMENTAR
 # =============================================================================
-def vetor(p1, p2): 
-    return p2 - p1
-
 def normalizar(v):
     norm = np.linalg.norm(v)
     return v if norm == 0 else v / norm
 
+# [NOVO] Função para projetar vetores no Plano Sagital (X e Z)
+def vetor_sagital(p1, p2): 
+    if p1 is None or p2 is None: 
+        return None
+    # Considerando X (índice 0) como eixo de progressão e Z (índice 2) como eixo vertical.
+    # Ignora-se o eixo Y (índice 1 - Médio-lateral)
+    return np.array([p2[0] - p1[0], p2[2] - p1[2]])
+
 def angulo_entre(v1, v2):
+    if v1 is None or v2 is None: 
+        return np.nan
     v1_u, v2_u = normalizar(v1), normalizar(v2)
     return np.degrees(np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)))
 
@@ -40,6 +47,10 @@ class ProcessadorCinematico:
         self.grupo = grupo
         self.valido = False
         self.erro_msg = ""
+        
+        # [NOVO] Extração do ID do paciente baseada no prefixo do arquivo
+        nome_limpo = nome_original.lower().replace('.c3d', '')
+        self.id_paciente = nome_limpo.split('_')[0].upper().strip()
 
         try:
             self.c3d = ezc3d.c3d(caminho_arquivo)
@@ -64,9 +75,7 @@ class ProcessadorCinematico:
             # --- NORMALIZAÇÃO ANTROPOMÉTRICA ---
             self.passo_norm = {'D': np.nan, 'E': np.nan}
             if df_antropo is not None:
-                nome_limpo = nome_original.lower().replace('.c3d', '')
-                id_paciente = nome_limpo.split('_')[0].upper().strip()
-                match = df_antropo[df_antropo['ID'] == id_paciente]
+                match = df_antropo[df_antropo['ID'] == self.id_paciente]
                 if not match.empty:
                     altura_m = float(match['ALTURA'].values[0])
                     if altura_m > 3.0: 
@@ -133,25 +142,39 @@ class ProcessadorCinematico:
         out[0, :, :] = -1 * out[0, :, :]
         return out
 
+    # [ALTERADO] Cálculo Articular agora utiliza projeção 2D (Sagital)
     def _calcular_angulos(self):
         res = {k: [] for k in ['Quad_D','Joel_D','Torn_D','Quad_E','Joel_E','Torn_E']}
-        vec_g = np.array([0,0,-1])
+        vec_g_2d = np.array([0, -1]) # Vetor gravidade projetado em 2D (apontando para baixo em Z)
+        
         for f in range(self.n_frames):
+            # Lado Direito
             h_d = self._get('RIAS',f); k_d = self._mid('RLE','RME',f); a_d = self._mid('RML','RMM',f); p_d = self._mid('RFT1','RFT5',f)
-            res['Quad_D'].append(angulo_entre(vetor(h_d, k_d), vec_g) if (h_d is not None and k_d is not None) else np.nan)
-            res['Joel_D'].append(angulo_entre(vetor(h_d, k_d), vetor(k_d, a_d)) if (h_d is not None and k_d is not None and a_d is not None) else np.nan)
-            res['Torn_D'].append(angulo_entre(vetor(k_d, a_d), vetor(a_d, p_d)) if (k_d is not None and p_d is not None) else np.nan)
+            v_coxa_d = vetor_sagital(h_d, k_d)
+            v_perna_d = vetor_sagital(k_d, a_d)
+            v_pe_d = vetor_sagital(a_d, p_d)
             
+            res['Quad_D'].append(angulo_entre(v_coxa_d, vec_g_2d))
+            res['Joel_D'].append(angulo_entre(v_coxa_d, v_perna_d))
+            res['Torn_D'].append(angulo_entre(v_perna_d, v_pe_d))
+            
+            # Lado Esquerdo
             h_e = self._get('LIAS',f); k_e = self._mid('LLE','LME',f); a_e = self._mid('LML','LMM',f); p_e = self._mid('LFT1','LFT5',f)
-            res['Quad_E'].append(angulo_entre(vetor(h_e, k_e), vec_g) if (h_e is not None and k_e is not None) else np.nan)
-            res['Joel_E'].append(angulo_entre(vetor(h_e, k_e), vetor(k_e, a_e)) if (h_e is not None and k_e is not None and a_e is not None) else np.nan)
-            res['Torn_E'].append(angulo_entre(vetor(k_e, a_e), vetor(a_e, p_e)) if (k_e is not None and p_e is not None) else np.nan)
+            v_coxa_e = vetor_sagital(h_e, k_e)
+            v_perna_e = vetor_sagital(k_e, a_e)
+            v_pe_e = vetor_sagital(a_e, p_e)
+            
+            res['Quad_E'].append(angulo_entre(v_coxa_e, vec_g_2d))
+            res['Joel_E'].append(angulo_entre(v_coxa_e, v_perna_e))
+            res['Torn_E'].append(angulo_entre(v_perna_e, v_pe_e))
+            
         return pd.DataFrame(res)
 
+    # [ALTERADO] Cálculo Segmentar agora utiliza projeção 2D (Sagital)
     def _calcular_angulos_segmentares(self):
         res = {k: [] for k in ['Coxa_D','Perna_D','Pe_D','Coxa_E','Perna_E','Pe_E']}
-        vec_v = np.array([0,0,-1]) 
-        vec_h = np.array([1,0,0])  
+        vec_v_2d = np.array([0, -1]) # Vertical em 2D
+        vec_h_2d = np.array([1, 0])  # Horizontal em 2D
         
         for f in range(self.n_frames):
             for lado, l in [('D', 'R'), ('E', 'L')]:
@@ -161,9 +184,13 @@ class ProcessadorCinematico:
                 p = self._mid(f'{l}FT1', f'{l}FT5',f)
                 cal = self._get(f'{l}CAL',f)
                 
-                res[f'Coxa_{lado}'].append(angulo_entre(vetor(h, k), vec_v) if (h is not None and k is not None) else np.nan)
-                res[f'Perna_{lado}'].append(angulo_entre(vetor(k, a), vec_v) if (k is not None and a is not None) else np.nan)
-                res[f'Pe_{lado}'].append(angulo_entre(vetor(cal, p), vec_h) if (cal is not None and p is not None) else np.nan)
+                v_coxa = vetor_sagital(h, k)
+                v_perna = vetor_sagital(k, a)
+                v_pe = vetor_sagital(cal, p)
+                
+                res[f'Coxa_{lado}'].append(angulo_entre(v_coxa, vec_v_2d))
+                res[f'Perna_{lado}'].append(angulo_entre(v_perna, vec_v_2d))
+                res[f'Pe_{lado}'].append(angulo_entre(v_pe, vec_h_2d))
                 
         return pd.DataFrame(res)
 
@@ -276,7 +303,6 @@ class ProcessadorCinematico:
             if len(hss) < 2: 
                 continue
             
-            # --- MOTOR DUPLO (ARTICULAR E SEGMENTAR) ---
             pares_articulares = [
                 (f'Quad_Joel_{lado}', f'Quad_{lado}', f'Joel_{lado}', self.angulos_df),
                 (f'Joel_Torn_{lado}', f'Joel_{lado}', f'Torn_{lado}', self.angulos_df)
@@ -616,19 +642,22 @@ if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width
         st.success(f"✅ {len(st.session_state.processadores)} arquivos processados e agrupados com sucesso!")
 
 if st.session_state.processadores:
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Tabela de Médias", "📈 Gráficos de Curvas", "⚙️ Coordenação (Angle-Angle)", 
-        "🎥 Animações 3D (GIFs)", "📦 Estatística (Boxplots e Barras)",
+        "🎥 Animações 3D (GIFs)", "📦 Estatística (Boxplots e Barras)", "🧪 Testes de Hipótese", "📝 Relatório Clínico"
     ])
 
     with tab1:
-        st.subheader("📊 Tabela de Dados Brutos e Estatística Descritiva")
-        st.write("Visão geral de todos os parâmetros.")
+        st.subheader("📊 Tabela de Dados Agrupados (Média por Paciente)")
+        st.write("Os dados abaixo representam a média de todas as tentativas processadas para cada paciente.")
+        
         dados_tabela = []
         for p in st.session_state.processadores:
             try:
+                # [ALTERADO] Inclusão do ID_Paciente para permitir o agrupamento (groupby)
                 linha = {
-                    "Arquivo": p.nome_arq, "Grupo": p.grupo,
+                    "ID_Paciente": p.id_paciente,
+                    "Grupo": p.grupo,
                     "Velocidade (m/s)": getattr(p, 'velocidade_media', np.nan),
                     "Apoio DIR (%)": p.fases_marcha.get('D', {}).get('Apoio', np.nan),
                     "Apoio ESQ (%)": p.fases_marcha.get('E', {}).get('Apoio', np.nan),
@@ -695,40 +724,29 @@ if st.session_state.processadores:
                         linha[f"CAV {par_label} (°)"] = np.nan
                         linha[f"Transições {par_label}"] = np.nan
                 
-                for k, v in linha.items():
-                    if isinstance(v, float) and not np.isnan(v): 
-                        linha[k] = round(v, 2)
-                    elif isinstance(v, float) and np.isnan(v): 
-                        linha[k] = ""
+                # Armazenar tudo como float puro no primeiro momento para o pandas fazer o agrupamento com precisão
                 dados_tabela.append(linha)
             except Exception: 
                 continue
                 
         if dados_tabela:
-            df_tabela = pd.DataFrame(dados_tabela)
-            summary_rows = []
-            df_calc = df_tabela.replace("", np.nan)
-            for grp in df_calc['Grupo'].unique():
-                df_grp = df_calc[df_calc['Grupo'] == grp]
-                mean_row = {"Arquivo": f"📌 MÉDIA - {grp}", "Grupo": grp}
-                std_row = {"Arquivo": f"📉 DESVIO PADRÃO - {grp}", "Grupo": grp}
-                for col in df_calc.columns:
-                    if col not in ["Arquivo", "Grupo"]:
-                        val_mean, val_std = df_grp[col].astype(float).mean(), df_grp[col].astype(float).std()
-                        mean_row[col] = round(val_mean, 2) if pd.notnull(val_mean) else ""
-                        std_row[col] = round(val_std, 2) if pd.notnull(val_std) else ""
-                summary_rows.extend([mean_row, std_row])
+            # [NOVA LÓGICA DE AGREGAÇÃO] Agrupar as tentativas por paciente calculando a média
+            df_bruto = pd.DataFrame(dados_tabela)
+            cols_num = df_bruto.select_dtypes(include=[np.number]).columns.tolist()
             
-            df_final = pd.concat([df_tabela, pd.DataFrame(summary_rows)], ignore_index=True)
+            # Agrupa calculando a média das tentativas para cada participante individualmente
+            df_agrupado_pacientes = df_bruto.groupby(['Grupo', 'ID_Paciente'])[cols_num].mean().reset_index()
+            df_agrupado_pacientes = df_agrupado_pacientes.round(2)
             
-            def highlight_summary(row):
-                if 'MÉDIA' in str(row['Arquivo']) or 'DESVIO PADRÃO' in str(row['Arquivo']): 
-                    return ['font-weight: bold'] * len(row)
-                return [''] * len(row)
+            # Formata NaNs como string vazia para display limpo
+            df_agrupado_pacientes = df_agrupado_pacientes.replace(np.nan, "")
 
-            st.dataframe(df_final.style.apply(highlight_summary, axis=1), use_container_width=True, height=600)
-            csv = df_final.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-            st.download_button("📥 Baixar Tabela de Dados (CSV)", data=csv, file_name="estatistica.csv", mime="text/csv", type="primary")
+            # Exibir na Interface
+            st.dataframe(df_agrupado_pacientes, use_container_width=True, height=600)
+            
+            # Exportar o CSV do DataFrame já agrupado
+            csv = df_agrupado_pacientes.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+            st.download_button("📥 Baixar Tabela Agrupada por Paciente (CSV)", data=csv, file_name="estatistica_agrupada_participantes.csv", mime="text/csv", type="primary")
         else: 
             st.info("Importe arquivos na barra lateral.")
 
