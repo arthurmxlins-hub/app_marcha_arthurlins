@@ -203,7 +203,7 @@ class ProcessadorCinematico:
             return eventos 
             
         pelvis_x = (rias_data[0] + lias_data[0]) / 2
-        dist_frames = int(self.freq * 0.4)
+        dist_frames = int(self.freq * 0.35)
         
         for lado, cal_label, toe_label in [('D','RCAL','RFT1'), ('E','LCAL','LFT1')]:
             cal_x_data = self._get(cal_label, slice(None))
