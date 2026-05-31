@@ -659,6 +659,8 @@ if st.session_state.processadores:
             st.info("Esta tabela agrupa a média entre o lado Direito e Esquerdo do participante, detalhando as variáveis espaço-temporais e a coordenação puramente segmentar (Coxa-Perna e Perna-Pé).")
             
             df_bilat = pd.DataFrame()
+            
+            # --- ESPAÇO-TEMPORAL ---
             df_bilat['Grupo'] = df_bruto['Grupo']
             df_bilat['ID_Paciente'] = df_bruto['ID_Paciente']
             df_bilat['Velocidade (m/s)'] = df_bruto['Velocidade (m/s)']
@@ -669,17 +671,22 @@ if st.session_state.processadores:
             if 'Passo DIR (% Altura)' in df_bruto.columns:
                 df_bilat['Passo Norm Bilat (%)'] = df_bruto[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
             
-            # CAV e Transições Segmentares
+            # --- COXA-PERNA (CP) ---
             df_bilat['CAV Coxa-Perna Bilat (°)'] = df_bruto[['CAV Segm_CP_DIR (°)', 'CAV Segm_CP_ESQ (°)']].mean(axis=1)
             df_bilat['Transições Coxa-Perna Bilat'] = df_bruto[['Transições Segm_CP_DIR', 'Transições Segm_CP_ESQ']].mean(axis=1)
-            df_bilat['CAV Perna-Pé Bilat (°)'] = df_bruto[['CAV Segm_PP_DIR (°)', 'CAV Segm_PP_ESQ (°)']].mean(axis=1)
-            df_bilat['Transições Perna-Pé Bilat'] = df_bruto[['Transições Segm_PP_DIR', 'Transições Segm_PP_ESQ']].mean(axis=1)
-
-            # Padrões de Coordenação Segmentar (Apoio e Balanço)
+            
             for padrao in padroes:
                 df_bilat[f'Apoio CP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_CP_DIR - {padrao} (%)', f'APOIO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
+            for padrao in padroes:
                 df_bilat[f'Balanço CP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_CP_DIR - {padrao} (%)', f'BALANÇO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
+
+            # --- PERNA-PÉ (PP) ---
+            df_bilat['CAV Perna-Pé Bilat (°)'] = df_bruto[['CAV Segm_PP_DIR (°)', 'CAV Segm_PP_ESQ (°)']].mean(axis=1)
+            df_bilat['Transições Perna-Pé Bilat'] = df_bruto[['Transições Segm_PP_DIR', 'Transições Segm_PP_ESQ']].mean(axis=1)
+            
+            for padrao in padroes:
                 df_bilat[f'Apoio PP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_PP_DIR - {padrao} (%)', f'APOIO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
+            for padrao in padroes:
                 df_bilat[f'Balanço PP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_PP_DIR - {padrao} (%)', f'BALANÇO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
 
             cols_num_b = df_bilat.select_dtypes(include=[np.number]).columns.tolist()
