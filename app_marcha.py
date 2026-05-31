@@ -272,54 +272,21 @@ class ProcessadorCinematico:
             ]
             
             for nome_par, col_prox, col_dist, df_ref in pares:
-                raw_prox = df_ref[col_prox].values
-                raw_dist = df_ref[col_dist].values
-                
-                if len(raw_prox) < 2 or len(raw_dist) < 2:
-                    continue
-                
-                # Inversão vetorial (-np.diff)
-                ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(raw_dist), -np.diff(raw_prox))), 360)
-                
-                if len(ca_cont) > 0:
-                    ca_cont = np.append(ca_cont, ca_cont[-1])
-                else:
+                # Extrai os ciclos e normaliza primeiro para 0-100% (101 pontos)
+                prox_norm_list = self.extrair_ciclos_normalizados(df_ref[col_prox].values, hss, tos)
+                dist_norm_list = self.extrair_ciclos_normalizados(df_ref[col_dist].values, hss, tos)
+
+                if not prox_norm_list or not dist_norm_list:
                     continue
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
                 cas = []
                 
-                for i in range(len(hss) - 1):
-                    hs_atual = hss[i]
-                    hs_prox = hss[i+1]
-                    if hs_prox >= len(ca_cont): continue
-                    
-                    to_valido = None
-                    tos_no_ciclo = [t for t in tos if hs_atual < t < hs_prox]
-                    if tos_no_ciclo: to_valido = tos_no_ciclo[0]
-                    
-                    if to_valido is not None and hs_atual < to_valido < hs_prox:
-                        fase_ap = ca_cont[hs_atual:to_valido+1]
-                        rad_ap = np.radians(fase_ap)
-                        sin_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.sin(rad_ap))
-                        cos_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.cos(rad_ap))
-                        
-                        fase_bal = ca_cont[to_valido:hs_prox+1]
-                        rad_bal = np.radians(fase_bal)
-                        sin_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.sin(rad_bal))
-                        cos_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.cos(rad_bal))
-                        
-                        sin_norm = np.concatenate((sin_ap, sin_bal[1:]))
-                        cos_norm = np.concatenate((cos_ap, cos_bal[1:]))
-                    else:
-                        ciclo_ca = ca_cont[hs_atual:hs_prox+1]
-                        if len(ciclo_ca) < 2: continue
-                        rad = np.radians(ciclo_ca)
-                        sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
-                        cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
-                        
-                    ca_norm = np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360)
+                # Calcula CA sobre os ciclos já normalizados de 101 pontos
+                for prox_norm, dist_norm in zip(prox_norm_list, dist_norm_list):
+                    ca_norm = np.mod(np.degrees(np.arctan2(-np.diff(dist_norm), -np.diff(prox_norm))), 360)
+                    ca_norm = np.append(ca_norm, ca_norm[-1]) # mantém 101 pontos
                     cas.append(ca_norm)
                     
                     counts = {'Proximal': 0, 'Distal': 0, 'EmFase': 0, 'AntiFase': 0}
@@ -545,44 +512,17 @@ if st.session_state.processadores:
         if 'parkinson' in g: return 'grey', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
 
-    # Normalização em Espaço Circular Bipartida (Apoio-Balanço) c/ Proteção int()
-    def calcular_ca_serie(prox_raw, dist_raw, hss, tos=None):
-        if len(prox_raw) < 2 or len(dist_raw) < 2: return []
-            
-        ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(dist_raw), -np.diff(prox_raw))), 360)
-        if len(ca_cont) > 0: ca_cont = np.append(ca_cont, ca_cont[-1])
-        else: return []
+    # Função externa unificada para gerar as séries do Coupling Angle 
+    # utilizando as matrizes de 101 pontos com inversão vetorial (Paper Style)
+    def calcular_ca_serie(prox_raw, dist_raw, p_obj, hss, tos=None):
+        prox_norm_list = p_obj.extrair_ciclos_normalizados(prox_raw, hss, tos)
+        dist_norm_list = p_obj.extrair_ciclos_normalizados(dist_raw, hss, tos)
         
         cas = []
-        if len(hss) < 2: return []
-        
-        for i in range(len(hss) - 1):
-            hs_atual = hss[i]; hs_prox = hss[i+1]
-            if hs_prox >= len(ca_cont): continue
-            
-            to_valido = None
-            if tos is not None:
-                tos_no_ciclo = [t for t in tos if hs_atual < t < hs_prox]
-                if tos_no_ciclo: to_valido = tos_no_ciclo[0]
-            
-            if to_valido is not None and hs_atual < to_valido < hs_prox:
-                fase_ap = ca_cont[hs_atual:to_valido+1]; rad_ap = np.radians(fase_ap)
-                sin_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.sin(rad_ap))
-                cos_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.cos(rad_ap))
-                
-                fase_bal = ca_cont[to_valido:hs_prox+1]; rad_bal = np.radians(fase_bal)
-                sin_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.sin(rad_bal))
-                cos_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.cos(rad_bal))
-                
-                sin_norm = np.concatenate((sin_ap, sin_bal[1:])); cos_norm = np.concatenate((cos_ap, cos_bal[1:]))
-            else:
-                ciclo_ca = ca_cont[hs_atual:hs_prox+1]
-                if len(ciclo_ca) < 2: continue
-                rad = np.radians(ciclo_ca)
-                sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
-                cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
-                
-            cas.append(np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360))
+        for p_n, d_n in zip(prox_norm_list, dist_norm_list):
+            ca_norm = np.mod(np.degrees(np.arctan2(-np.diff(d_n), -np.diff(p_n))), 360)
+            ca_norm = np.append(ca_norm, ca_norm[-1])
+            cas.append(ca_norm)
         return cas
 
     def media_circular(ciclos):
@@ -613,7 +553,6 @@ if st.session_state.processadores:
                 hss = p.eventos[lado]['HS']
                 tos = p.eventos[lado]['TO']
                 
-                # Normalização das Curvas Cinemáticas Espaciais Fixadas em 60%
                 cics_quad = p.extrair_ciclos_normalizados(p.angulos_df[f"Quad_{lado}"].values, hss, tos)
                 cics_joel = p.extrair_ciclos_normalizados(p.angulos_df[f"Joel_{lado}"].values, hss, tos)
                 cics_torn = p.extrair_ciclos_normalizados(p.angulos_df[f"Torn_{lado}"].values, hss, tos)
@@ -628,11 +567,11 @@ if st.session_state.processadores:
                 dados_curvas[grp]['Seg'][f"Perna_{lado}"].extend(cics_perna)
                 dados_curvas[grp]['Seg'][f"Pe_{lado}"].extend(cics_pe)
                 
-                # Normalização Vetorial em Espaço Circular Fixado em 60%
-                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Quad_{lado}"].values, p.angulos_df[f"Joel_{lado}"].values, hss, tos))
-                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Joel_{lado}"].values, p.angulos_df[f"Torn_{lado}"].values, hss, tos))
-                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, hss, tos))
-                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, hss, tos))
+                # O cálculo CA agora recebe "p" para extrair os 101 pontos PRIMEIRO
+                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Quad_{lado}"].values, p.angulos_df[f"Joel_{lado}"].values, p, hss, tos))
+                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Joel_{lado}"].values, p.angulos_df[f"Torn_{lado}"].values, p, hss, tos))
+                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, p, hss, tos))
+                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, p, hss, tos))
 
     tab1, tab2, tab_paper, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
         "📊 Tabela", "📈 Cinemática", "📄 Plot Paper (A-G)", "🔄 Angle-Angle", "📈 Coupling Angle", 
@@ -679,8 +618,11 @@ if st.session_state.processadores:
                             if len(c_prox) > 0 and len(c_dist) > 0:
                                 arr_p, arr_d = np.array(c_prox), np.array(c_dist)
                                 delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
-                                gamma_rad = np.arctan2(delta_d, delta_p)
+                                
+                                # Aplicando inversão do vetor para CAV bater com os dados do paper
+                                gamma_rad = np.arctan2(-delta_d, -delta_p)
                                 gamma_deg = (np.degrees(gamma_rad) + 360) % 360
+                                
                                 x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
                                 r = np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1)
                                 linha[f"CAV {par_label} (°)"] = np.mean(np.sqrt(2 * (1 - r)) * (180 / np.pi))
@@ -835,8 +777,8 @@ if st.session_state.processadores:
                     plt.tight_layout(); st.pyplot(fig_ind); plt.close(fig_ind)
 
     with tab_paper:
-        st.subheader("📄 Relatório Paper: Padronização Direta da Função (A-G)")
-        st.info("Layout recriado mantendo os cálculos com a fórmula contínua exigida pela literatura Vector Coding. Dados de plotagem extraídos em tempo real e não interpolados previamente.")
+        st.subheader("📄 Relatório Paper: Plotagem Normalizada de Vector Coding (A-G)")
+        st.info("Layout recriado utilizando vetores cinemáticos já normalizados a 100% do ciclo de marcha.")
         if len(st.session_state.processadores) > 0:
             p_nomes = [p.nome_arq for p in st.session_state.processadores]
             p_selecionado = st.selectbox("Selecione o Arquivo a Analisar:", p_nomes)
@@ -845,16 +787,22 @@ if st.session_state.processadores:
             l = 'D' if 'Direito' in lado_p else 'E'
 
             if len(proc.eventos[l]['HS']) >= 2:
-                start = proc.eventos[l]['HS'][0]
-                end = proc.eventos[l]['HS'][1]
-                t_arr = np.arange(end - start) / proc.freq
+                hss = proc.eventos[l]['HS']
+                tos = proc.eventos[l]['TO']
                 
-                coxa = proc.segmentos_df[f'Coxa_{l}'].values[start:end]
-                perna = proc.segmentos_df[f'Perna_{l}'].values[start:end]
-                pe = proc.segmentos_df[f'Pe_{l}'].values[start:end]
+                # Extrai o primeiro ciclo de marcha já em 101 pontos normalizados
+                coxa_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Coxa_{l}'].values, hss, tos)
+                perna_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Perna_{l}'].values, hss, tos)
+                pe_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Pe_{l}'].values, hss, tos)
 
-                if len(coxa) > 1 and len(perna) > 1 and len(pe) > 1:
-                    # FÓRMULA ORIGINAL do Coupling Angle com inversão vetorial
+                if coxa_list and perna_list and pe_list:
+                    coxa = coxa_list[0]
+                    perna = perna_list[0]
+                    pe = pe_list[0]
+                    
+                    x_perc = np.linspace(0, 100, 101)
+
+                    # Calcula Coupling Angle DIRETAMENTE sobre os 101 pontos
                     ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(perna), -np.diff(coxa))), 360)
                     ca_cp = np.append(ca_cp, ca_cp[-1])
                     
@@ -867,9 +815,9 @@ if st.session_state.processadores:
                     axB = plt.subplot2grid((3, 6), (0, 2), colspan=2)
                     axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
                     
-                    axA.plot(t_arr, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('Time (s)'); axA.set_ylabel('Thigh angular rotation (°)')
-                    axB.plot(t_arr, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('Time (s)'); axB.set_ylabel('Shank angular rotation (°)')
-                    axC.plot(t_arr, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('Time (s)'); axC.set_ylabel('Foot angular rotation (°)')
+                    axA.plot(x_perc, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('% Cycle'); axA.set_ylabel('Thigh angular rotation (°)')
+                    axB.plot(x_perc, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('% Cycle'); axB.set_ylabel('Shank angular rotation (°)')
+                    axC.plot(x_perc, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('% Cycle'); axC.set_ylabel('Foot angular rotation (°)')
 
                     axD = plt.subplot2grid((3, 6), (1, 0), colspan=3)
                     axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
@@ -883,10 +831,10 @@ if st.session_state.processadores:
                     axF = plt.subplot2grid((3, 6), (2, 0), colspan=3)
                     axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
 
-                    axF.plot(t_arr, ca_cp, 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('Time (s)'); axF.set_ylabel('Thigh-shank coupling angle (°)')
+                    axF.plot(x_perc, ca_cp, 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('% Cycle'); axF.set_ylabel('Thigh-shank coupling angle (°)')
                     axF.set_ylim(0, 360)
                     
-                    axG.plot(t_arr, ca_pp, 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('Time (s)'); axG.set_ylabel('Shank-foot coupling angle (°)')
+                    axG.plot(x_perc, ca_pp, 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('% Cycle'); axG.set_ylabel('Shank-foot coupling angle (°)')
                     axG.set_ylim(0, 360)
 
                     plt.tight_layout()
@@ -928,7 +876,7 @@ if st.session_state.processadores:
                     if x_cics and y_cics:
                         x_mean, y_mean = np.mean(np.array(x_cics), axis=0), np.mean(np.array(y_cics), axis=0)
                         ax.plot(x_mean, y_mean, color='black', lw=1.5)
-                        ax.scatter(x_mean[0], y_mean[0], color='black', s=40, zorder=5)
+                        ax.scatter(x_mean[0], y_mean[0], color='black', s=40, zorder=5) # Black dot instead of green
                     ax.set_xlabel(label_x, fontsize=10); ax.set_ylabel(label_y, fontsize=10)
                     ax.axhline(0, color='black', lw=0.5); ax.axvline(0, color='black', lw=0.5)
                 plt.tight_layout(); st.pyplot(fig_aa_ctrl); plt.close(fig_aa_ctrl)
