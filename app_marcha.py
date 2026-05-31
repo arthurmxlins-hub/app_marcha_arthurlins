@@ -581,7 +581,7 @@ if st.session_state.processadores:
     ])
 
     with tab1:
-        st.subheader("📊 Tabela de Dados Agrupados (Média por Paciente)")
+        st.subheader("📊 Tabela de Dados Agrupados (Unilateral Completa)")
         dados_tabela = []
         for p in st.session_state.processadores:
             try:
@@ -648,9 +648,44 @@ if st.session_state.processadores:
             df_bruto = pd.DataFrame(dados_tabela)
             cols_num = df_bruto.select_dtypes(include=[np.number]).columns.tolist()
             df_agrupado_pacientes = df_bruto.groupby(['Grupo', 'ID_Paciente'])[cols_num].mean().reset_index().round(2).replace(np.nan, "")
-            st.dataframe(df_agrupado_pacientes, use_container_width=True, height=600)
-            csv = df_agrupado_pacientes.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-            st.download_button("📥 Baixar Tabela Agrupada", data=csv, file_name="estatistica_agrupada.csv", mime="text/csv", type="primary")
+            st.dataframe(df_agrupado_pacientes, use_container_width=True, height=400)
+            csv1 = df_agrupado_pacientes.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+            st.download_button("📥 Baixar Tabela Unilateral", data=csv1, file_name="estatistica_unilateral.csv", mime="text/csv", type="primary")
+
+            st.markdown("---")
+            st.subheader("📊 Tabela de Médias Bilaterais (Espaço-Temporal e Coordenação Segmentar)")
+            st.info("Esta tabela agrupa a média entre o lado Direito e Esquerdo do participante, detalhando as variáveis espaço-temporais e a coordenação puramente segmentar (Coxa-Perna e Perna-Pé).")
+            
+            df_bilat = pd.DataFrame()
+            df_bilat['Grupo'] = df_bruto['Grupo']
+            df_bilat['ID_Paciente'] = df_bruto['ID_Paciente']
+            df_bilat['Velocidade (m/s)'] = df_bruto['Velocidade (m/s)']
+            df_bilat['Apoio Bilat (%)'] = df_bruto[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
+            df_bilat['Clearance Bilat (mm)'] = df_bruto[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
+            df_bilat['Passo Bilat (mm)'] = df_bruto[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
+            
+            if 'Passo DIR (% Altura)' in df_bruto.columns:
+                df_bilat['Passo Norm Bilat (%)'] = df_bruto[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
+            
+            # CAV e Transições Segmentares
+            df_bilat['CAV Coxa-Perna Bilat (°)'] = df_bruto[['CAV Segm_CP_DIR (°)', 'CAV Segm_CP_ESQ (°)']].mean(axis=1)
+            df_bilat['Transições Coxa-Perna Bilat'] = df_bruto[['Transições Segm_CP_DIR', 'Transições Segm_CP_ESQ']].mean(axis=1)
+            df_bilat['CAV Perna-Pé Bilat (°)'] = df_bruto[['CAV Segm_PP_DIR (°)', 'CAV Segm_PP_ESQ (°)']].mean(axis=1)
+            df_bilat['Transições Perna-Pé Bilat'] = df_bruto[['Transições Segm_PP_DIR', 'Transições Segm_PP_ESQ']].mean(axis=1)
+
+            # Padrões de Coordenação Segmentar (Apoio e Balanço)
+            for padrao in padroes:
+                df_bilat[f'Apoio CP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_CP_DIR - {padrao} (%)', f'APOIO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
+                df_bilat[f'Balanço CP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_CP_DIR - {padrao} (%)', f'BALANÇO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
+                df_bilat[f'Apoio PP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_PP_DIR - {padrao} (%)', f'APOIO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
+                df_bilat[f'Balanço PP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_PP_DIR - {padrao} (%)', f'BALANÇO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
+
+            cols_num_b = df_bilat.select_dtypes(include=[np.number]).columns.tolist()
+            df_bilat_agrupado = df_bilat.groupby(['Grupo', 'ID_Paciente'])[cols_num_b].mean().reset_index().round(2).replace(np.nan, "")
+            
+            st.dataframe(df_bilat_agrupado, use_container_width=True, height=400)
+            csv2 = df_bilat_agrupado.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+            st.download_button("📥 Baixar Tabela Bilateral (Segmentar)", data=csv2, file_name="estatistica_bilateral_segmentar.csv", mime="text/csv", type="secondary")
 
     with tab2:
         st.subheader("📈 Curvas Cinemáticas Normalizadas (0-100% do Ciclo)")
