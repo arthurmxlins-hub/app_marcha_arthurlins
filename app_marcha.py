@@ -226,7 +226,6 @@ class ProcessadorCinematico:
             hss = self.eventos[lado]['HS']
             if len(hss) < 2: continue
             
-            # --- AQUI ESTÁ A DEFINIÇÃO DE 'pares' ---
             pares = [
                 (f'Quad_Joel_{lado}', f'Quad_{lado}', f'Joel_{lado}', self.angulos_df),
                 (f'Joel_Torn_{lado}', f'Joel_{lado}', f'Torn_{lado}', self.angulos_df),
@@ -235,22 +234,21 @@ class ProcessadorCinematico:
             ]
             
             for nome_par, col_prox, col_dist, df_ref in pares:
-                
+                # Cálculo ORIGINAL sobre os dados contínuos para evitar distorção da derivada
                 raw_prox = df_ref[col_prox].values
                 raw_dist = df_ref[col_dist].values
                 
-                
+                # --- PROTEÇÃO CONTRA MATRIZ VAZIA E INVERSÃO DE VETOR (PAPER) ---
                 if len(raw_prox) < 2 or len(raw_dist) < 2:
                     continue
                 
-                
+                # Inversão do vetor (-np.diff) para replicar a plotagem do artigo
                 ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(raw_dist), -np.diff(raw_prox))), 360)
                 
                 if len(ca_cont) > 0:
                     ca_cont = np.append(ca_cont, ca_cont[-1])
                 else:
                     continue
-                -
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
@@ -493,26 +491,28 @@ if st.session_state.processadores:
         if 'control' in g: return 'black', '-', 1.2
         if 'parkinson' in g: return 'black', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
- 
+
+    # Nova função que calcula a diferença matemática nas matrizes contínuas 
     def calcular_ca_serie(prox_raw, dist_raw, hss):
-        
+        # --- PROTEÇÃO CONTRA MATRIZ VAZIA E INVERSÃO DE VETOR (PAPER) ---
         if len(prox_raw) < 2 or len(dist_raw) < 2:
             return []
             
-        
         ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(dist_raw), -np.diff(prox_raw))), 360)
         
         if len(ca_cont) > 0:
             ca_cont = np.append(ca_cont, ca_cont[-1])
         else:
             return []
-        
+        # ----------------------------------------------------------------
         
         cas = []
         if len(hss) < 2: return []
         for i in range(len(hss) - 1):
             if hss[i+1] > len(ca_cont): continue
             ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+            
+            if len(ciclo_ca) == 0: continue
             
             # Normalização circular 0-100%
             rad = np.radians(ciclo_ca)
@@ -744,56 +744,55 @@ if st.session_state.processadores:
             l = 'D' if 'Direito' in lado_p else 'E'
 
             if len(proc.eventos[l]['HS']) >= 2:
-                # Utilizamos as batidas do calcanhar (HS) para delimitar 1 ciclo real
                 start = proc.eventos[l]['HS'][0]
                 end = proc.eventos[l]['HS'][1]
                 t_arr = np.arange(end - start) / proc.freq
                 
-                # Dados ADVINDOS DIRETAMENTE DA FUNÇÃO SEGMENTAR sem normalização prévia
                 coxa = proc.segmentos_df[f'Coxa_{l}'].values[start:end]
                 perna = proc.segmentos_df[f'Perna_{l}'].values[start:end]
                 pe = proc.segmentos_df[f'Pe_{l}'].values[start:end]
 
-                ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(perna), -np.diff(coxa))), 360)
-                ca_cp = np.append(ca_cp, ca_cp[-1])
-                # Shank-Foot: Foot (Y) and Shank (X)
-                ca_pp = np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(perna))), 360)
-                ca_pp = np.append(ca_pp, ca_pp[-1])
+                if len(coxa) > 1 and len(perna) > 1 and len(pe) > 1:
+                    # FÓRMULA ORIGINAL do Coupling Angle com inversão vetorial
+                    ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(perna), -np.diff(coxa))), 360)
+                    ca_cp = np.append(ca_cp, ca_cp[-1])
+                    
+                    ca_pp = np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(perna))), 360)
+                    ca_pp = np.append(ca_pp, ca_pp[-1])
 
-                fig_paper = plt.figure(figsize=(12, 12))
-                
-                # A, B, C (Row 1)
-                axA = plt.subplot2grid((3, 6), (0, 0), colspan=2)
-                axB = plt.subplot2grid((3, 6), (0, 2), colspan=2)
-                axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
-                
-                axA.plot(t_arr, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('Time (s)'); axA.set_ylabel('Thigh angular rotation (°)')
-                axB.plot(t_arr, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('Time (s)'); axB.set_ylabel('Shank angular rotation (°)')
-                axC.plot(t_arr, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('Time (s)'); axC.set_ylabel('Foot angular rotation (°)')
+                    fig_paper = plt.figure(figsize=(12, 12))
+                    
+                    axA = plt.subplot2grid((3, 6), (0, 0), colspan=2)
+                    axB = plt.subplot2grid((3, 6), (0, 2), colspan=2)
+                    axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
+                    
+                    axA.plot(t_arr, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('Time (s)'); axA.set_ylabel('Thigh angular rotation (°)')
+                    axB.plot(t_arr, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('Time (s)'); axB.set_ylabel('Shank angular rotation (°)')
+                    axC.plot(t_arr, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('Time (s)'); axC.set_ylabel('Foot angular rotation (°)')
 
-                # D, E (Row 2 - Angle-Angle com os dados diretos da função original)
-                axD = plt.subplot2grid((3, 6), (1, 0), colspan=3)
-                axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
-                
-                axD.plot(coxa, perna, 'k-', lw=1.2); axD.set_title('D', loc='left', fontweight='bold'); axD.set_xlabel('Thigh (°)'); axD.set_ylabel('Shank (°)')
-                axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
-                
-                axE.plot(perna, pe, 'k-', lw=1.2); axE.set_title('E', loc='left', fontweight='bold'); axE.set_xlabel('Shank (°)'); axE.set_ylabel('Foot (°)')
-                axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
+                    axD = plt.subplot2grid((3, 6), (1, 0), colspan=3)
+                    axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
+                    
+                    axD.plot(coxa, perna, 'k-', lw=1.2); axD.set_title('D', loc='left', fontweight='bold'); axD.set_xlabel('Thigh (°)'); axD.set_ylabel('Shank (°)')
+                    axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
+                    
+                    axE.plot(perna, pe, 'k-', lw=1.2); axE.set_title('E', loc='left', fontweight='bold'); axE.set_xlabel('Shank (°)'); axE.set_ylabel('Foot (°)')
+                    axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
 
-                # F, G (Row 3 - Séries Temporais do Coupling Angle)
-                axF = plt.subplot2grid((3, 6), (2, 0), colspan=3)
-                axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
+                    axF = plt.subplot2grid((3, 6), (2, 0), colspan=3)
+                    axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
 
-                axF.plot(t_arr, ca_cp, 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('Time (s)'); axF.set_ylabel('Thigh-shank coupling angle (°)')
-                axF.set_ylim(0, 360)
-                
-                axG.plot(t_arr, ca_pp, 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('Time (s)'); axG.set_ylabel('Shank-foot coupling angle (°)')
-                axG.set_ylim(0, 360)
+                    axF.plot(t_arr, ca_cp, 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('Time (s)'); axF.set_ylabel('Thigh-shank coupling angle (°)')
+                    axF.set_ylim(0, 360)
+                    
+                    axG.plot(t_arr, ca_pp, 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('Time (s)'); axG.set_ylabel('Shank-foot coupling angle (°)')
+                    axG.set_ylim(0, 360)
 
-                plt.tight_layout()
-                st.pyplot(fig_paper)
-                plt.close(fig_paper)
+                    plt.tight_layout()
+                    st.pyplot(fig_paper)
+                    plt.close(fig_paper)
+                else:
+                    st.warning("Dados curtos demais para processar este lado.")
             else:
                 st.warning("Sem dados suficientes (contato inicial) para isolar um ciclo neste lado.")
 
@@ -1175,3 +1174,4 @@ if st.session_state.processadores:
         col_box3, col_box4 = st.columns(2)
         with col_box3:
             fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"); st.pyplot(fig5); plt.close(fig5)
+    
