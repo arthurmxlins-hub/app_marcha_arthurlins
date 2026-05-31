@@ -222,24 +222,22 @@ class ProcessadorCinematico:
 
     def _calcular_coordenacao_vetorial(self):
         res = {}; self.coord_vetorial_series = {} 
-        for lado in ['D', 'E']:
-            hss = self.eventos[lado]['HS']
-            if len(hss) < 2: continue
-            
-            pares = [
-                (f'Quad_Joel_{lado}', f'Quad_{lado}', f'Joel_{lado}', self.angulos_df),
-                (f'Joel_Torn_{lado}', f'Joel_{lado}', f'Torn_{lado}', self.angulos_df),
-                (f'Coxa_Perna_{lado}', f'Coxa_{lado}', f'Perna_{lado}', self.segmentos_df),
-                (f'Perna_Pe_{lado}', f'Perna_{lado}', f'Pe_{lado}', self.segmentos_df)
-            ]
-            
-            for nome_par, col_prox, col_dist, df_ref in pares:
+        for nome_par, col_prox, col_dist, df_ref in pares:
                 # Cálculo ORIGINAL sobre os dados contínuos para evitar distorção da derivada
                 raw_prox = df_ref[col_prox].values
                 raw_dist = df_ref[col_dist].values
                 
+                # --- PROTEÇÃO CONTRA MATRIZ VAZIA ---
+                if len(raw_prox) < 2 or len(raw_dist) < 2:
+                    continue
+                
                 ca_cont = np.mod(np.degrees(np.arctan2(np.diff(raw_dist), np.diff(raw_prox))), 360)
-                ca_cont = np.append(ca_cont, ca_cont[-1])
+                
+                if len(ca_cont) > 0:
+                    ca_cont = np.append(ca_cont, ca_cont[-1])
+                else:
+                    continue
+                # ------------------------------------
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
@@ -483,8 +481,18 @@ if st.session_state.processadores:
 
     # Nova função que calcula a diferença matemática nas matrizes contínuas 
     def calcular_ca_serie(prox_raw, dist_raw, hss):
+        # --- PROTEÇÃO CONTRA MATRIZ VAZIA ---
+        if len(prox_raw) < 2 or len(dist_raw) < 2:
+            return []
+            
         ca_cont = np.mod(np.degrees(np.arctan2(np.diff(dist_raw), np.diff(prox_raw))), 360)
-        ca_cont = np.append(ca_cont, ca_cont[-1])
+        
+        if len(ca_cont) > 0:
+            ca_cont = np.append(ca_cont, ca_cont[-1])
+        else:
+            return []
+        # ------------------------------------
+        
         cas = []
         if len(hss) < 2: return []
         for i in range(len(hss) - 1):
