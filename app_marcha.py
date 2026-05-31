@@ -443,4 +443,599 @@ class GeradorVisual:
                     dx, dy = p_prox[j_prox] - p_curr[j_prox], p_prox[j_dist] - p_curr[j_dist]
                     ang = np.degrees(np.arctan2(dy, dx)) % 360 if not (np.isnan(dx) or np.isnan(dy)) else np.nan
                     if not np.isnan(ang):
-                        ptr.set_data(
+                        ptr.set_data([0, np.cos(np.radians(ang))], [0, np.sin(np.radians(ang))])
+                        label, cor = self._classificar_angulo(ang)
+                        txt.set_text(label); txt.set_color(cor)
+            return list(linhas.values()) + [t_dynamic, txt_qj_d, txt_jt_d, txt_qj_e, txt_jt_e, ptr_qjd, ptr_jtd, ptr_qje, ptr_jte]
+
+        ani = animation.FuncAnimation(fig, update, frames=range(0, self.proc.n_frames, step), interval=50)
+        try:
+            ani.save(caminho_final, writer='pillow', fps=fps_anim)
+            return True, caminho_final
+        except Exception as e: return False, str(e)
+        finally: plt.close(fig); plt.close('all')
+
+# =============================================================================
+# INTERFACE WEB STREAMLIT
+# =============================================================================
+st.title("🚶 GPBIO - Sistema de Análise de Marcha")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📏 Dados Antropométricos")
+st.sidebar.info("Planilha com colunas 'ID' e 'Altura' (em metros). O ID deve bater com as iniciais do arquivo C3D.")
+arquivo_antropo = st.sidebar.file_uploader("Planilha de Altura (Excel/CSV)", type=['xlsx', 'csv'])
+
+df_antropo = None
+if arquivo_antropo:
+    if arquivo_antropo.name.endswith('xlsx'): df_antropo = pd.read_excel(arquivo_antropo)
+    else: df_antropo = pd.read_csv(arquivo_antropo, sep=';', decimal=',')
+    df_antropo.columns = df_antropo.columns.str.strip().str.upper()
+    if 'ID' in df_antropo.columns and 'ALTURA' in df_antropo.columns:
+        df_antropo['ID'] = df_antropo['ID'].astype(str).str.upper().str.strip()
+        st.sidebar.success(f"Dados de {len(df_antropo)} participantes prontos para normalização!")
+    else:
+        st.sidebar.error("A planilha precisa ter as colunas 'ID' e 'ALTURA'. Encontrado: " + ", ".join(df_antropo.columns))
+        df_antropo = None
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Sobre o Sistema")
+st.sidebar.info("GPBIO: Análise Biomecânica de Marcha.")
+st.sidebar.markdown("**Desenvolvido por Arthur Lins**")
+	
+if 'processadores' not in st.session_state: st.session_state.processadores = []
+
+st.subheader("📁 Importação de Dados e Separação de Grupos")
+st.info("Digite os nomes dos grupos do seu estudo e faça o upload dos arquivos .c3d dinâmicos em suas respectivas áreas.")
+
+col_g1, col_g2 = st.columns(2)
+with col_g1:
+    nome_g1 = st.text_input("Nome do Grupo 1 (Ex: Controle)", value="Controle")
+    files_g1 = st.file_uploader(f"Arquivos C3D - {nome_g1}", type=['c3d'], accept_multiple_files=True, key="up_g1")
+with col_g2:
+    nome_g2 = st.text_input("Nome do Grupo 2 (Ex: Parkinson)", value="Intervenção")
+    files_g2 = st.file_uploader(f"Arquivos C3D - {nome_g2}", type=['c3d'], accept_multiple_files=True, key="up_g2")
+
+if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width=True):
+    arquivos_para_processar = []
+    if files_g1: arquivos_para_processar.extend([(f, nome_g1) for f in files_g1 if "CAL" not in f.name.upper()])
+    if files_g2: arquivos_para_processar.extend([(f, nome_g2) for f in files_g2 if "CAL" not in f.name.upper()])
+
+    if not arquivos_para_processar:
+        st.warning("Faça o upload de arquivos dinâmicos em pelo menos um dos grupos para continuar.")
+    else:
+        st.session_state.processadores = []
+        progress_bar = st.progress(0)
+        
+        for i, (file, nome_grupo) in enumerate(arquivos_para_processar):
+            file.seek(0) 
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.c3d') as tmp_file:
+                tmp_file.write(file.read()) 
+                tmp_file.flush()            
+                os.fsync(tmp_file.fileno()) 
+                tmp_path = tmp_file.name
+                
+            proc = ProcessadorCinematico(tmp_path, file.name, grupo=nome_grupo, df_antropo=df_antropo)
+            if proc.valido: st.session_state.processadores.append(proc)
+            else: st.error(f"Erro no arquivo {file.name}: {proc.erro_msg}")
+            try: os.remove(tmp_path)
+            except Exception: pass 
+            progress_bar.progress((i + 1) / len(arquivos_para_processar))
+            
+        st.success(f"✅ {len(st.session_state.processadores)} arquivos processados e agrupados com sucesso!")
+
+if st.session_state.processadores:
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Tabela de Médias", "📈 Gráficos de Curvas", "⚙️ Coordenação (Angle-Angle)", 
+        "🎥 Animações 3D (GIFs)", "📦 Estatística Espaço-Temporal"
+    ])
+
+    with tab1:
+        st.subheader("📊 Tabela de Dados Agrupados (Média por Paciente)")
+        st.write("Os dados abaixo representam a média de todas as tentativas processadas para cada paciente.")
+        
+        dados_tabela = []
+        for p in st.session_state.processadores:
+            try:
+                linha = {
+                    "ID_Paciente": p.id_paciente, "Grupo": p.grupo, "Velocidade (m/s)": getattr(p, 'velocidade_media', np.nan),
+                    "Apoio DIR (%)": p.fases_marcha.get('D', {}).get('Apoio', np.nan), "Apoio ESQ (%)": p.fases_marcha.get('E', {}).get('Apoio', np.nan),
+                    "Clearance DIR (mm)": p.foot_clearance.get('D', np.nan), "Clearance ESQ (mm)": p.foot_clearance.get('E', np.nan),
+                    "Passo DIR (mm)": p.comprimento_passo.get('D', np.nan), "Passo ESQ (mm)": p.comprimento_passo.get('E', np.nan),
+                    "Passo DIR (% Altura)": p.passo_norm.get('D', np.nan) if hasattr(p, 'passo_norm') else np.nan,
+                    "Passo ESQ (% Altura)": p.passo_norm.get('E', np.nan) if hasattr(p, 'passo_norm') else np.nan,
+                }
+                
+                stats = p.obter_stats()
+                if stats:
+                    for art in ['Quad_D', 'Quad_E', 'Joel_D', 'Joel_E', 'Torn_D', 'Torn_E']:
+                        linha[f"{art} Máx (°)"] = stats.get(art, {}).get('max', np.nan)
+                        linha[f"{art} Mín (°)"] = stats.get(art, {}).get('min', np.nan)
+
+                pares_coord_tab1 = [
+                    ('Artic_QJ_DIR', 'Quad_Joel_D', 'angulos_df'), ('Artic_QJ_ESQ', 'Quad_Joel_E', 'angulos_df'),
+                    ('Artic_JT_DIR', 'Joel_Torn_D', 'angulos_df'), ('Artic_JT_ESQ', 'Joel_Torn_E', 'angulos_df'),
+                    ('Segm_CP_DIR', 'Coxa_Perna_D', 'segmentos_df'), ('Segm_CP_ESQ', 'Coxa_Perna_E', 'segmentos_df'),
+                    ('Segm_PP_DIR', 'Perna_Pe_D', 'segmentos_df'), ('Segm_PP_ESQ', 'Perna_Pe_E', 'segmentos_df')
+                ]
+                padroes = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
+
+                for par_label, par_key, nome_df in pares_coord_tab1:
+                    try:
+                        prox_name, dist_name, lado = par_key.split('_')[0], par_key.split('_')[1], par_key.split('_')[2]
+                        hss = p.eventos[lado]['HS']
+                        df_obj = getattr(p, nome_df)
+                        
+                        if len(hss) > 1:
+                            c_prox = p.extrair_ciclos_normalizados(df_obj[f"{prox_name}_{lado}"].values, hss)
+                            c_dist = p.extrair_ciclos_normalizados(df_obj[f"{dist_name}_{lado}"].values, hss)
+                            
+                            if len(c_prox) > 0 and len(c_dist) > 0:
+                                arr_p, arr_d = np.array(c_prox), np.array(c_dist)
+                                delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
+                                gamma_rad = np.arctan2(delta_d, delta_p)
+                                gamma_deg = (np.degrees(gamma_rad) + 360) % 360
+                                
+                                x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
+                                r = np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1)
+                                linha[f"CAV {par_label} (°)"] = np.mean(np.sqrt(2 * (1 - r)) * (180 / np.pi))
+                                
+                                padroes_idx = np.digitize(gamma_deg, [0, 45, 135, 225, 315, 360])
+                                padroes_idx[padroes_idx == 5] = 1
+                                linha[f"Transições {par_label}"] = np.mean(np.sum(np.diff(padroes_idx, axis=1) != 0, axis=1))
+                            else:
+                                linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
+                        else:
+                            linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
+
+                        serie = p.coord_vetorial_series.get(par_key, [])
+                        fatia_apoio = serie[0:60] if len(serie) >= 60 else []
+                        fatia_balanco = serie[60:] if len(serie) > 60 else []
+
+                        for padrao in padroes:
+                            linha[f"APOIO {par_label} - {padrao} (%)"] = (fatia_apoio.count(padrao) / len(fatia_apoio)) * 100 if len(fatia_apoio) > 0 else np.nan
+                            linha[f"BALANÇO {par_label} - {padrao} (%)"] = (fatia_balanco.count(padrao) / len(fatia_balanco)) * 100 if len(fatia_balanco) > 0 else np.nan
+                    except Exception:
+                        linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
+                
+                dados_tabela.append(linha)
+            except Exception: continue
+                
+        if dados_tabela:
+            df_bruto = pd.DataFrame(dados_tabela)
+            cols_num = df_bruto.select_dtypes(include=[np.number]).columns.tolist()
+            
+            df_agrupado_pacientes = df_bruto.groupby(['Grupo', 'ID_Paciente'])[cols_num].mean().reset_index()
+            df_agrupado_pacientes = df_agrupado_pacientes.round(2).replace(np.nan, "")
+
+            st.dataframe(df_agrupado_pacientes, use_container_width=True, height=600)
+            csv = df_agrupado_pacientes.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+            st.download_button("📥 Baixar Tabela Agrupada por Paciente (CSV)", data=csv, file_name="estatistica_agrupada_participantes.csv", mime="text/csv", type="primary")
+        else: st.info("Importe arquivos na barra lateral.")
+
+    with tab2:
+        st.subheader("📈 Curvas Cinemáticas (Tempo em Segundos)")
+        grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
+        
+        # Consolidação de dados para plotagem temporal
+        dados_curvas = {grp: {'Art': {}, 'Seg': {}, 'Tempos': []} for grp in grupos_estudo}
+        chaves_art = ['Quad_D', 'Joel_D', 'Torn_D', 'Quad_E', 'Joel_E', 'Torn_E']
+        chaves_seg = ['Coxa_D', 'Perna_D', 'Pe_D', 'Coxa_E', 'Perna_E', 'Pe_E']
+        
+        for grp in grupos_estudo:
+            for c in chaves_art: dados_curvas[grp]['Art'][c] = []
+            for c in chaves_seg: dados_curvas[grp]['Seg'][c] = []
+            
+            procs_grp = [p for p in st.session_state.processadores if p.grupo == grp]
+            for p in procs_grp:
+                if hasattr(p, 'tempo_ciclo_s') and not np.isnan(p.tempo_ciclo_s):
+                    dados_curvas[grp]['Tempos'].append(p.tempo_ciclo_s)
+                
+                for lado in ['D', 'E']:
+                    hss = p.eventos[lado]['HS']
+                    for j in ['Quad', 'Joel', 'Torn']:
+                        cics = p.extrair_ciclos_normalizados(p.angulos_df[f"{j}_{lado}"].values, hss)
+                        dados_curvas[grp]['Art'][f"{j}_{lado}"].extend(cics)
+                    for s in ['Coxa', 'Perna', 'Pe']:
+                        cics = p.extrair_ciclos_normalizados(p.segmentos_df[f"{s}_{lado}"].values, hss)
+                        dados_curvas[grp]['Seg'][f"{s}_{lado}"].extend(cics)
+
+        sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
+            "🦴 Articulares (Dir/Esq)", "🦵 Segmentares (Dir/Esq)", 
+            "⚖️ Comparação Articular (Bilateral)", "⚖️ Comparação Segmentar (Bilateral)"
+        ])
+
+        # --- SUB-ABA 1: Articulares por Lado ---
+        with sub_t1:
+            cols_art = st.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_art[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
+                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    mapeamento = [('Quad_D', 0, 0, 'Quadril (DIR)'), ('Quad_E', 0, 1, 'Quadril (ESQ)'), 
+                                  ('Joel_D', 1, 0, 'Joelho (DIR)'), ('Joel_E', 1, 1, 'Joelho (ESQ)'), 
+                                  ('Torn_D', 2, 0, 'Tornozelo (DIR)'), ('Torn_E', 2, 1, 'Tornozelo (ESQ)')]
+                    
+                    for chave, row, col, titulo in mapeamento:
+                        ax = axs[row, col]
+                        ciclos = np.array(dados_curvas[grp]['Art'][chave])
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                        ax.set_title(titulo, fontweight='bold', fontsize=10)
+                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
+
+                        if len(ciclos) > 0:
+                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
+                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
+                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
+                            ax.axhline(0, color='black', lw=0.8)
+                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close(fig)
+
+        # --- SUB-ABA 2: Segmentares por Lado ---
+        with sub_t2:
+            cols_seg = st.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_seg[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
+                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    mapeamento = [('Coxa_D', 0, 0, 'Coxa (DIR)'), ('Coxa_E', 0, 1, 'Coxa (ESQ)'), 
+                                  ('Perna_D', 1, 0, 'Perna (DIR)'), ('Perna_E', 1, 1, 'Perna (ESQ)'), 
+                                  ('Pe_D', 2, 0, 'Pé (DIR)'), ('Pe_E', 2, 1, 'Pé (ESQ)')]
+                    
+                    for chave, row, col, titulo in mapeamento:
+                        ax = axs[row, col]
+                        ciclos = np.array(dados_curvas[grp]['Seg'][chave])
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                        ax.set_title(titulo, fontweight='bold', fontsize=10)
+                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
+
+                        if len(ciclos) > 0:
+                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
+                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
+                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
+                            ax.axhline(0, color='black', lw=0.8)
+                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close(fig)
+
+        # --- SUB-ABA 3: Comparação Articular (Bilateral) ---
+        with sub_t3:
+            st.markdown("<h5 style='text-align:center;'>Média Bilateral Articular (Direito + Esquerdo)</h5>", unsafe_allow_html=True)
+            fig_comp_art, axs_comp_art = plt.subplots(1, 3, figsize=(15, 5))
+            cores_comp = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd'] # Até 4 grupos
+            articulacoes = ['Quad', 'Joel', 'Torn']
+            titulos = ['Quadril', 'Joelho', 'Tornozelo']
+
+            for i, art in enumerate(articulacoes):
+                ax = axs_comp_art[i]
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.set_title(titulos[i], fontweight='bold', fontsize=11)
+                ax.set_xlabel("Tempo (s)", fontsize=9)
+                if i == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                ax.axhline(0, color='black', lw=0.8)
+
+                for idx, grp in enumerate(grupos_estudo):
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    ciclos_bilaterais = dados_curvas[grp]['Art'][f"{art}_D"] + dados_curvas[grp]['Art'][f"{art}_E"]
+                    if len(ciclos_bilaterais) > 0:
+                        ciclos_np = np.array(ciclos_bilaterais)
+                        media = np.mean(ciclos_np, axis=0)
+                        std = np.std(ciclos_np, axis=0)
+                        
+                        ax.plot(x_axis, media, label=grp, color=cores_comp[idx % len(cores_comp)], lw=2)
+                        ax.fill_between(x_axis, media - std, media + std, color=cores_comp[idx % len(cores_comp)], alpha=0.15)
+                
+                if i == 2: ax.legend(loc='best')
+            
+            plt.tight_layout()
+            st.pyplot(fig_comp_art); plt.close(fig_comp_art)
+
+        # --- SUB-ABA 4: Comparação Segmentar (Bilateral) ---
+        with sub_t4:
+            st.markdown("<h5 style='text-align:center;'>Média Bilateral Segmentar (Direito + Esquerdo)</h5>", unsafe_allow_html=True)
+            fig_comp_seg, axs_comp_seg = plt.subplots(1, 3, figsize=(15, 5))
+            segmentos = ['Coxa', 'Perna', 'Pe']
+            titulos_seg = ['Segmento da Coxa', 'Segmento da Perna', 'Segmento do Pé']
+
+            for i, seg in enumerate(segmentos):
+                ax = axs_comp_seg[i]
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.set_title(titulos_seg[i], fontweight='bold', fontsize=11)
+                ax.set_xlabel("Tempo (s)", fontsize=9)
+                if i == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                ax.axhline(0, color='black', lw=0.8)
+
+                for idx, grp in enumerate(grupos_estudo):
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    ciclos_bilaterais = dados_curvas[grp]['Seg'][f"{seg}_D"] + dados_curvas[grp]['Seg'][f"{seg}_E"]
+                    if len(ciclos_bilaterais) > 0:
+                        ciclos_np = np.array(ciclos_bilaterais)
+                        media = np.mean(ciclos_np, axis=0)
+                        std = np.std(ciclos_np, axis=0)
+                        
+                        ax.plot(x_axis, media, label=grp, color=cores_comp[idx % len(cores_comp)], lw=2)
+                        ax.fill_between(x_axis, media - std, media + std, color=cores_comp[idx % len(cores_comp)], alpha=0.15)
+                
+                if i == 2: ax.legend(loc='best')
+            
+            plt.tight_layout()
+            st.pyplot(fig_comp_seg); plt.close(fig_comp_seg)
+
+    with tab3:
+        st.subheader("⚙️ Coordenação Vetorial e Controle Motor")
+        tipo_coord = st.radio("Selecione o Modelo de Análise Biomecânica:", 
+                              ["📐 Coordenação Segmentar (Absoluta - Padrão Ouro)", "📍 Coordenação Articular (Relativa)"], 
+                              horizontal=True)
+        
+        if "Segmentar" in tipo_coord:
+            pares_map = [('Coxa_Perna_D', 'Coxa-Perna (DIR)'), ('Coxa_Perna_E', 'Coxa-Perna (ESQ)'), ('Perna_Pe_D', 'Perna-Pé (DIR)'), ('Perna_Pe_E', 'Perna-Pé (ESQ)')]
+            label_prox_1, label_dist_1 = 'Coxa', 'Perna'
+            label_prox_2, label_dist_2 = 'Perna', 'Pe'
+            label_cav_1, label_cav_2 = 'Coxa_Perna', 'Perna_Pe'
+            df_ref = 'segmentos_df'
+        else:
+            pares_map = [('Quad_Joel_D', 'Quad-Joel (DIR)'), ('Quad_Joel_E', 'Quad-Joel (ESQ)'), ('Joel_Torn_D', 'Joel-Torn (DIR)'), ('Joel_Torn_E', 'Joel-Torn (ESQ)')]
+            label_prox_1, label_dist_1 = 'Quad', 'Joel'
+            label_prox_2, label_dist_2 = 'Joel', 'Torn'
+            label_cav_1, label_cav_2 = 'Quad_Joel', 'Joel_Torn'
+            df_ref = 'angulos_df'
+
+        st.markdown("---")
+        grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
+        cor_g1, cor_g2 = '#a8c8f9', '#f9a8a8'
+        padroes = {'Proximal': '#e74c3c', 'EmFase': '#2ecc71', 'Distal': '#3498db', 'AntiFase': '#f1c40f'}
+
+        freq_acumulada = {g: {c_new: {k: [] for k in padroes} for _, c_new in pares_map} for g in grupos_estudo}
+        cav_data = {label_cav_1: {g: [] for g in grupos_estudo}, label_cav_2: {g: [] for g in grupos_estudo}}
+        trans_data = {label_cav_1: {g: [] for g in grupos_estudo}, label_cav_2: {g: [] for g in grupos_estudo}}
+
+        for p in st.session_state.processadores:
+            grp = p.grupo
+            for c_old, c_new in pares_map:
+                freqs = p.coord_vetorial.get(c_old, {})
+                for k in padroes.keys():
+                    if not np.isnan(freqs.get(k, np.nan)): freq_acumulada[grp][c_new][k].append(freqs[k])
+
+            for prox, dist, label_cav in [(label_prox_1, label_dist_1, label_cav_1), (label_prox_2, label_dist_2, label_cav_2)]:
+                for lado in ['D', 'E']:
+                    chave_prox, chave_dist = f"{prox}_{lado}", f"{dist}_{lado}"
+                    hss = p.eventos[lado]['HS']
+                    if len(hss) > 1:
+                        df_obj = getattr(p, df_ref)
+                        c_prox = p.extrair_ciclos_normalizados(df_obj[chave_prox].values, hss)
+                        c_dist = p.extrair_ciclos_normalizados(df_obj[chave_dist].values, hss)
+                        
+                        if len(c_prox) > 0 and len(c_dist) > 0:
+                            arr_p, arr_d = np.array(c_prox), np.array(c_dist)
+                            delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
+                            gamma_rad = np.arctan2(delta_d, delta_p)
+                            gamma_deg = (np.degrees(gamma_rad) + 360) % 360
+                            padroes_idx = np.digitize(gamma_deg, [0, 45, 135, 225, 315, 360])
+                            padroes_idx[padroes_idx == 5] = 1 
+                            trans_data[label_cav][grp].append(np.mean(np.sum(np.diff(padroes_idx, axis=1) != 0, axis=1)))
+                            x_m, y_m = np.mean(np.cos(gamma_rad), axis=0), np.mean(np.sin(gamma_rad), axis=0)
+                            cav_data[label_cav][grp].append(np.mean(np.sqrt(2 * (1 - np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1))) * (180 / np.pi)))
+
+        st.markdown("### 1. Comportamento Espacial (Diagramas Angle-Angle)")
+        cols_t3 = st.columns(len(grupos_estudo))
+        for idx, grp in enumerate(grupos_estudo):
+            with cols_t3[idx]:
+                st.markdown(f"<h4 style='text-align:center; color: #555;'>Grupo: {grp}</h4>", unsafe_allow_html=True)
+                procs_grp = [p for p in st.session_state.processadores if p.grupo == grp]
+                dados_grp = { f'{label_prox_1}_D': [], f'{label_dist_1}_D': [], f'{label_dist_2}_D': [], f'{label_prox_1}_E': [], f'{label_dist_1}_E': [], f'{label_dist_2}_E': [] }
+                
+                for proc in procs_grp:
+                    for joint in [label_prox_1, label_dist_1, label_dist_2]:
+                        for lado in ['D', 'E']:
+                            chave = f"{joint}_{lado}"
+                            df_obj = getattr(proc, df_ref)
+                            ciclos = proc.extrair_ciclos_normalizados(df_obj[chave].values, proc.eventos[lado]['HS'])
+                            dados_grp[chave].extend(ciclos)
+
+                fig_coord, axs_coord = plt.subplots(2, 2, figsize=(7, 7))
+                pares_plot = [
+                    (axs_coord[0, 0], 'D', label_prox_1, label_dist_1, f'{label_prox_1}(°)', f'{label_dist_1}(°)'),
+                    (axs_coord[0, 1], 'E', label_prox_1, label_dist_1, f'{label_prox_1}(°)', f'{label_dist_1}(°)'),
+                    (axs_coord[1, 0], 'D', label_prox_2, label_dist_2, f'{label_prox_2}(°)', f'{label_dist_2}(°)'),
+                    (axs_coord[1, 1], 'E', label_prox_2, label_dist_2, f'{label_prox_2}(°)', f'{label_dist_2}(°)')
+                ]
+                for ax, lado, prox, dist, label_x, label_y in pares_plot:
+                    ciclos_prox, ciclos_dist = np.array(dados_grp[f"{prox}_{lado}"]), np.array(dados_grp[f"{dist}_{lado}"])
+                    if len(ciclos_prox) > 0 and len(ciclos_dist) > 0:
+                        media_prox, media_dist = np.mean(ciclos_prox, axis=0), np.mean(ciclos_dist, axis=0)
+                        ax.plot(media_prox, media_dist, color='blue' if lado=='E' else 'red', lw=2)
+                        ax.scatter(media_prox[0], media_dist[0], color='green', s=60, zorder=5)
+                        ax.scatter(media_prox[60], media_dist[60], color='orange', marker='X', s=60, zorder=5)
+                    ax.set_xlabel(label_x, fontsize=9); ax.set_ylabel(label_y, fontsize=9)
+                    ax.set_title(f"{prox}-{dist} ({lado})", fontweight='bold', fontsize=10)
+                    ax.grid(True, linestyle='--', alpha=0.5)
+                plt.tight_layout(); st.pyplot(fig_coord); plt.close(fig_coord)
+
+        st.markdown("---")
+        st.markdown("### 2. Distribuição por Fases (Apoio vs. Balanço)")
+        sub_tab_apoio, sub_tab_balanco = st.tabs(["🦵 Fase de Apoio (0-60%)", "✈️ Fase de Balanço (60-100%)"])
+        
+        def plot_fase_especifica(container, inicio, fim, titulo_fase):
+            cols_fase = container.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_fase[idx]:
+                    st.markdown(f"<h6 style='text-align:center;'>{titulo_fase}: {grp}</h6>", unsafe_allow_html=True)
+                    fig_bar, ax_bar = plt.subplots(figsize=(8, 6))
+                    labels_pares = list(freq_acumulada[grp].keys())
+                    m_prox, m_fase, m_dist, m_anti = [], [], [], []
+                    for par in labels_pares:
+                        chave_par_interna = next(old for old, new in pares_map if new == par)
+                        f_prox, f_fase, f_dist, f_anti, contagem = 0, 0, 0, 0, 0
+                        for p in [proc for proc in st.session_state.processadores if proc.grupo == grp]:
+                            try:
+                                fatia = p.coord_vetorial_series.get(chave_par_interna, [])[inicio:fim]
+                                total_fatia = len(fatia)
+                                if total_fatia > 0:
+                                    f_prox += fatia.count('Proximal') / total_fatia; f_fase += fatia.count('EmFase') / total_fatia
+                                    f_dist += fatia.count('Distal') / total_fatia; f_anti += fatia.count('AntiFase') / total_fatia
+                                    contagem += 1
+                            except Exception: continue
+                        denom = contagem if contagem > 0 else 1
+                        m_prox.append((f_prox/denom)*100); m_fase.append((f_fase/denom)*100)
+                        m_dist.append((f_dist/denom)*100); m_anti.append((f_anti/denom)*100)
+                    
+                    x, width = np.arange(len(labels_pares)), 0.55
+                    bar1 = ax_bar.bar(x, m_prox, width, label='Proximal', color=padroes['Proximal'])
+                    bar2 = ax_bar.bar(x, m_fase, width, bottom=m_prox, label='Em Fase', color=padroes['EmFase'])
+                    bar3 = ax_bar.bar(x, m_dist, width, bottom=np.add(m_prox, m_fase), label='Distal', color=padroes['Distal'])
+                    bar4 = ax_bar.bar(x, m_anti, width, bottom=np.add(np.add(m_prox, m_fase), m_dist), label='Anti-Fase', color=padroes['AntiFase'])
+                    for bar_group in [bar1, bar2, bar3, bar4]:
+                        lbls = [f"{v.get_height():.1f}%" if v.get_height() > 2.0 else "" for v in bar_group]
+                        ax_bar.bar_label(bar_group, labels=lbls, label_type='center', color='black', fontweight='bold', fontsize=9)
+                    
+                    ax_bar.set_ylabel('Frequência (%)', fontweight='bold'); ax_bar.set_xticks(x)
+                    ax_bar.set_xticklabels(labels_pares, fontweight='bold', rotation=15, fontsize=8)
+                    ax_bar.set_ylim(0, 105); ax_bar.spines['top'].set_visible(False); ax_bar.spines['right'].set_visible(False)
+                    if idx == len(grupos_estudo) - 1:
+                        leg = ax_bar.legend(loc='upper left', bbox_to_anchor=(1.02, 1), title="Padrões")
+                        leg.get_title().set_fontweight('bold')
+                    plt.tight_layout(); st.pyplot(fig_bar); plt.close(fig_bar)
+
+        plot_fase_especifica(sub_tab_apoio, 0, 60, "Apoio")
+        plot_fase_especifica(sub_tab_balanco, 60, 100, "Balanço")
+
+        st.markdown("---")
+        st.markdown("### 3. Índices de Estabilidade e Fluidez Motora")
+        col_cav, col_trans = st.columns(2)
+        def plot_grouped_bars(ax, dict_data, titulo, ylabel):
+            labels_grupos = list(dict_data.keys())
+            means = [np.mean(dict_data[g]) if dict_data[g] else 0 for g in labels_grupos]
+            stds = [np.std(dict_data[g]) if dict_data[g] else 0 for g in labels_grupos]
+            cores = [cor_g1, cor_g2] if len(labels_grupos) > 1 else [cor_g1]
+            bars = ax.bar(np.arange(len(labels_grupos)), means, yerr=stds, capsize=8, color=cores, edgecolor='black', alpha=0.9, width=0.6)
+            ax.bar_label(bars, fmt='%.1f', padding=3, fontweight='bold')
+            ax.set_xticks(np.arange(len(labels_grupos))); ax.set_xticklabels(labels_grupos, fontweight='bold')
+            ax.set_title(titulo, fontweight='bold', fontsize=12); ax.set_ylabel(ylabel)
+            ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+            ax.grid(axis='y', linestyle='--', alpha=0.3)
+
+        with col_cav:
+            fig_cav, axs_cav = plt.subplots(1, 2, figsize=(10, 5))
+            plot_grouped_bars(axs_cav[0], cav_data[label_cav_1], f"Variabilidade (CAV)\n{label_prox_1}-{label_dist_1}", "Graus (°)")
+            plot_grouped_bars(axs_cav[1], cav_data[label_cav_2], f"Variabilidade (CAV)\n{label_prox_2}-{label_dist_2}", "Graus (°)")
+            plt.tight_layout(); st.pyplot(fig_cav); plt.close(fig_cav)
+            
+        with col_trans:
+            fig_tr, axs_tr = plt.subplots(1, 2, figsize=(10, 5))
+            plot_grouped_bars(axs_tr[0], trans_data[label_cav_1], f"Taxa de Transições\n{label_prox_1}-{label_dist_1}", "Mudanças / Ciclo")
+            plot_grouped_bars(axs_tr[1], trans_data[label_cav_2], f"Taxa de Transições\n{label_prox_2}-{label_dist_2}", "Mudanças / Ciclo")
+            plt.tight_layout(); st.pyplot(fig_tr); plt.close(fig_tr)
+
+    with tab4:
+        st.subheader("Gerador de GIFs e Biofeedback Visual")
+        st.info("Escolha os arquivos que deseja animar e a velocidade de reprodução.")
+        lista_nomes = [p.nome_arq for p in st.session_state.processadores]
+        col_selecao, col_vel = st.columns([2, 1])
+        with col_selecao: selecionados = st.multiselect("Selecione os arquivos para animar:", lista_nomes)
+        with col_vel: vel_opcao = st.radio("Velocidade de Reprodução:", ["100% (Normal)", "75% (Lenta)", "50% (Muito Lenta)"])
+        fps_escolhido = {"100% (Normal)": 20, "75% (Lenta)": 15, "50% (Muito Lenta)": 10}[vel_opcao]
+        
+        if st.button("Gerar GIFs Selecionados", type="primary"):
+            for p in st.session_state.processadores:
+                if p.nome_arq in selecionados:
+                    with st.spinner(f"Processando animação ({vel_opcao}) para: {p.nome_arq}..."):
+                        fd, tmp_gif_path = tempfile.mkstemp(suffix='.gif'); os.close(fd) 
+                        viz = GeradorVisual(p, p.nome_arq)
+                        sucesso, msg = viz.salvar(tmp_gif_path, step=3, fps_anim=fps_escolhido)
+                        if sucesso:
+                            st.image(tmp_gif_path, caption=f"Análise 3D: {p.nome_arq}", use_container_width=True)
+                            with open(tmp_gif_path, "rb") as file_gif: 
+                                st.download_button(f"📥 Baixar GIF", data=file_gif, file_name=f"{p.nome_arq.split('.')[0]}_3D.gif", mime="image/gif")
+                        else: st.error(f"Falha: {msg}")
+
+    with tab5:
+        st.subheader("Estatística Espaço-Temporal")
+        grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
+        cor_g1, cor_g2 = '#a8c8f9', '#f9a8a8'
+        cores_grupos = {grupos_estudo[0]: cor_g1}
+        if len(grupos_estudo) > 1: cores_grupos[grupos_estudo[1]] = cor_g2
+
+        v_vel = {g: [] for g in grupos_estudo}; v_ap_d = {g: [] for g in grupos_estudo}; v_ap_e = {g: [] for g in grupos_estudo}
+        v_fc_d = {g: [] for g in grupos_estudo}; v_fc_e = {g: [] for g in grupos_estudo}
+        v_ps_d = {g: [] for g in grupos_estudo}; v_ps_e = {g: [] for g in grupos_estudo}
+        v_ps_norm_d = {g: [] for g in grupos_estudo}; v_ps_norm_e = {g: [] for g in grupos_estudo}
+        
+        for p in st.session_state.processadores:
+            grp = p.grupo
+            if not np.isnan(p.velocidade_media): v_vel[grp].append(p.velocidade_media)
+            if not np.isnan(p.fases_marcha['D']['Apoio']): v_ap_d[grp].append(p.fases_marcha['D']['Apoio'])
+            if not np.isnan(p.fases_marcha['E']['Apoio']): v_ap_e[grp].append(p.fases_marcha['E']['Apoio'])
+            if not np.isnan(p.foot_clearance['D']): v_fc_d[grp].append(p.foot_clearance['D'])
+            if not np.isnan(p.foot_clearance['E']): v_fc_e[grp].append(p.foot_clearance['E'])
+            if not np.isnan(p.comprimento_passo['D']): v_ps_d[grp].append(p.comprimento_passo['D'])
+            if not np.isnan(p.comprimento_passo['E']): v_ps_e[grp].append(p.comprimento_passo['E'])
+            if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('D', np.nan)): v_ps_norm_d[grp].append(p.passo_norm['D'])
+            if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('E', np.nan)): v_ps_norm_e[grp].append(p.passo_norm['E'])
+
+        def gerar_colunas_passo_norm(dict_dados, titulo):
+            fig, ax = plt.subplots(figsize=(8, 6))
+            labels = list(dict_dados.keys())
+            means = [np.nanmean(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
+            stds = [np.nanstd(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
+            cores = [cor_g1 if grupos_estudo[0] in l else cor_g2 for l in labels]
+            bars = ax.bar(labels, means, yerr=stds, capsize=10, color=cores, edgecolor='black', alpha=0.8)
+            for i, bar in enumerate(bars):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + stds[i] + 1, f"Média: {means[i]:.0f}%\nDP: ±{stds[i]:.1f}%", ha='center', fontweight='bold', bbox=dict(facecolor='white', alpha=0.7))
+            ax.set_title(titulo, fontweight='bold', fontsize=14); ax.set_ylabel("Porcentagem da Estatura (%)", fontsize=12)
+            ax.set_ylim(0, 100); ax.grid(axis='y', linestyle='--', alpha=0.5)
+            plt.tight_layout(); return fig
+        
+        def gerar_boxplot_isolado(dict_dados, titulo, ylabel):
+            fig, ax = plt.subplots(figsize=(8, 6)) 
+            labels = list(dict_dados.keys())
+            dados_limpos = [dict_dados[l] for l in labels if len(dict_dados[l]) > 0]
+            labels_limpos = [l for l in labels if len(dict_dados[l]) > 0]
+            if dados_limpos:
+                bp = ax.boxplot(dados_limpos, patch_artist=True, labels=labels_limpos)
+                for i, patch in enumerate(bp['boxes']): 
+                    grp_name = labels_limpos[i].split('(')[0] if '(' in labels_limpos[i] else labels_limpos[i]
+                    patch.set_facecolor(cores_grupos.get(grp_name, '#dddddd'))
+                for median in bp['medians']: median.set(color='black', linewidth=2)
+                for i, d in enumerate(dados_limpos):
+                    media, dp, mediana = np.mean(d), np.std(d), np.median(d)
+                    ax.text(i + 1.10, mediana, f"M: {media:.1f}\nDP: {dp:.1f}", ha='left', va='center', fontsize=10, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.3'))
+                ax.set_xlim(0.5, len(dados_limpos) + 0.9)
+                ymin, ymax = ax.get_ylim(); ax.set_ylim(ymin - (ymax-ymin)*0.1, ymax + (ymax-ymin)*0.1)
+                ax.set_title(titulo, fontweight='bold', fontsize=14); ax.set_ylabel(ylabel, fontsize=12)
+                ax.grid(True, linestyle='--', alpha=0.5)
+            plt.tight_layout(); return fig
+
+        dict_vel = {g: v_vel[g] for g in grupos_estudo}
+        dict_ap = {}; dict_fc = {}; dict_ps = {}; dict_ps_norm = {}
+        for g in grupos_estudo:
+            dict_ap[f"{g}(D)"] = v_ap_d[g]; dict_ap[f"{g}(E)"] = v_ap_e[g]
+            dict_fc[f"{g}(D)"] = v_fc_d[g]; dict_fc[f"{g}(E)"] = v_fc_e[g]
+            dict_ps[f"{g}(D)"] = v_ps_d[g]; dict_ps[f"{g}(E)"] = v_ps_e[g]
+            dict_ps_norm[f"{g}(D)"] = v_ps_norm_d[g]; dict_ps_norm[f"{g}(E)"] = v_ps_norm_e[g]
+            
+        col_box1, col_box2 = st.columns(2)
+        with col_box1:
+            fig1 = gerar_boxplot_isolado(dict_vel, "Velocidade Média", "m/s"); st.pyplot(fig1); plt.close(fig1)
+            fig2 = gerar_boxplot_isolado(dict_fc, "Foot Clearance", "mm"); st.pyplot(fig2); plt.close(fig2)
+        with col_box2:
+            fig3 = gerar_boxplot_isolado(dict_ap, "Fase de Apoio", "% do Ciclo"); st.pyplot(fig3); plt.close(fig3)
+            fig4 = gerar_boxplot_isolado(dict_ps, "Comprimento do Passo (Absoluto)", "mm"); st.pyplot(fig4); plt.close(fig4)
+            
+        st.markdown("---")
+        col_box3, col_box4 = st.columns(2)
+        with col_box3:
+            fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"); st.pyplot(fig5); plt.close(fig5)
