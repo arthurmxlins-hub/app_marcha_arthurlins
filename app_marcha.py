@@ -115,6 +115,7 @@ class ProcessadorCinematico:
 
     def _ang_sagital_horiz(self, p_prox, p_dist):
         if p_prox is None or p_dist is None: return np.nan
+        # Correção da polaridade sagital do pé (referencial horizontal absoluto)
         dx = (p_dist[0] - p_prox[0]) * self.dir_x
         dz = p_dist[2] - p_prox[2]
         return np.degrees(np.arctan2(dz, dx))
@@ -137,7 +138,10 @@ class ProcessadorCinematico:
                 coxa = self.segmentos_df[f'Coxa_{lado}'][f]; perna = self.segmentos_df[f'Perna_{lado}'][f]; pe = self.segmentos_df[f'Pe_{lado}'][f]
                 res[f'Quad_{lado}'].append(coxa) 
                 res[f'Joel_{lado}'].append(coxa - perna if not (np.isnan(coxa) or np.isnan(perna)) else np.nan)
-                res[f'Torn_{lado}'].append(perna + pe if not (np.isnan(pe) or np.isnan(perna)) else np.nan)
+                
+                # CORREÇÃO: Ângulo do tornozelo ajustado para (Pé - Perna) 
+                # Garante que a Dorsiflexão seja Positiva (+) e Flexão Plantar seja Negativa (-)
+                res[f'Torn_{lado}'].append(pe - perna if not (np.isnan(pe) or np.isnan(perna)) else np.nan)
         return pd.DataFrame(res)
 
     def detectar_eventos_zeni(self):
@@ -246,7 +250,7 @@ class ProcessadorCinematico:
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
                 
-                cas = [] # Array para guardar todos os Coupling Angles de cada ciclo
+                cas = []
                 
                 for cp, cd in zip(c_prox, c_dist):
                     angulos = np.mod(np.degrees(np.arctan2(np.diff(cd), np.diff(cp))), 360)
@@ -260,7 +264,6 @@ class ProcessadorCinematico:
                     for k in counts: freqs[k].append((counts[k] / len(angulos)) * 100)
                 for k in freqs: res[nome_par][k] = np.mean(freqs[k])
                 
-                # CORREÇÃO: Utilizando a Estatística Circular (Batschelet, 1981) para a média dos padrões
                 rad = np.radians(np.array(cas))
                 s_m = np.nanmean(np.sin(rad), axis=0)
                 c_m = np.nanmean(np.cos(rad), axis=0)
@@ -585,7 +588,6 @@ if st.session_state.processadores:
 
                         serie = p.coord_vetorial_series.get(par_key, [])
                         
-                        # CORREÇÃO: Utilizando a porcentagem real de apoio em vez de cravado em 60%
                         pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
                         idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
                         
@@ -886,7 +888,6 @@ if st.session_state.processadores:
     with tab_freq:
         st.subheader("📊 Frequência de Coordenação Vetorial (Vector Coding)")
         
-        # Padrões de Plotagem Pretos e Brancos (Publicação)
         bw_padroes = {
             'Proximal': {'cor': '#ffffff', 'hatch': '////'},
             'EmFase':   {'cor': '#cccccc', 'hatch': '\\\\\\\\'},
@@ -913,7 +914,6 @@ if st.session_state.processadores:
                 for k in bw_padroes.keys():
                     if not np.isnan(freqs.get(k, np.nan)): freq_acumulada[grp][c_new][k].append(freqs[k])
                     
-        # CORREÇÃO: Utilizando os recortes dinâmicos de Apoio/Balanço para cada paciente.
         def compilar_frequencia_bilateral(grupos, pares_origem, fase="Apoio"):
             dados = {g: {k: 0 for k in bw_padroes} for g in grupos}
             for grp in grupos:
@@ -1003,73 +1003,4 @@ if st.session_state.processadores:
 
     with tab_est:
         st.subheader("Estatística Espaço-Temporal")
-        v_vel = {g: [] for g in grupos_estudo}; v_ap_d = {g: [] for g in grupos_estudo}; v_ap_e = {g: [] for g in grupos_estudo}
-        v_fc_d = {g: [] for g in grupos_estudo}; v_fc_e = {g: [] for g in grupos_estudo}
-        v_ps_d = {g: [] for g in grupos_estudo}; v_ps_e = {g: [] for g in grupos_estudo}
-        v_ps_norm_d = {g: [] for g in grupos_estudo}; v_ps_norm_e = {g: [] for g in grupos_estudo}
-        
-        for p in st.session_state.processadores:
-            grp = p.grupo
-            if not np.isnan(p.velocidade_media): v_vel[grp].append(p.velocidade_media)
-            if not np.isnan(p.fases_marcha['D']['Apoio']): v_ap_d[grp].append(p.fases_marcha['D']['Apoio'])
-            if not np.isnan(p.fases_marcha['E']['Apoio']): v_ap_e[grp].append(p.fases_marcha['E']['Apoio'])
-            if not np.isnan(p.foot_clearance['D']): v_fc_d[grp].append(p.foot_clearance['D'])
-            if not np.isnan(p.foot_clearance['E']): v_fc_e[grp].append(p.foot_clearance['E'])
-            if not np.isnan(p.comprimento_passo['D']): v_ps_d[grp].append(p.comprimento_passo['D'])
-            if not np.isnan(p.comprimento_passo['E']): v_ps_e[grp].append(p.comprimento_passo['E'])
-            if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('D', np.nan)): v_ps_norm_d[grp].append(p.passo_norm['D'])
-            if hasattr(p, 'passo_norm') and not np.isnan(p.passo_norm.get('E', np.nan)): v_ps_norm_e[grp].append(p.passo_norm['E'])
-
-        def gerar_colunas_passo_norm(dict_dados, titulo):
-            fig, ax = plt.subplots(figsize=(8, 6))
-            labels = list(dict_dados.keys())
-            means = [np.nanmean(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
-            stds = [np.nanstd(dict_dados[l]) if dict_dados[l] else 0 for l in labels]
-            cores = ['#d3d3d3' if 'control' in l.lower() else ('#707070' if 'parkinson' in l.lower() else cores_comp[i % len(cores_comp)]) for i, l in enumerate(labels)]
-            bars = ax.bar(labels, means, yerr=stds, capsize=10, color=cores, edgecolor='black', alpha=0.8)
-            for i, bar in enumerate(bars):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + stds[i] + 1, f"Média: {means[i]:.0f}%\nDP: ±{stds[i]:.1f}%", ha='center', fontweight='bold', bbox=dict(facecolor='white', alpha=0.7))
-            ax.set_title(titulo, fontweight='bold', fontsize=14); ax.set_ylabel("Porcentagem da Estatura (%)", fontsize=12)
-            ax.set_ylim(0, 100); ax.grid(axis='y', linestyle='--', alpha=0.5)
-            plt.tight_layout(); return fig
-        
-        def gerar_boxplot_isolado(dict_dados, titulo, ylabel):
-            fig, ax = plt.subplots(figsize=(8, 6)) 
-            labels = list(dict_dados.keys())
-            dados_limpos = [dict_dados[l] for l in labels if len(dict_dados[l]) > 0]
-            labels_limpos = [l for l in labels if len(dict_dados[l]) > 0]
-            if dados_limpos:
-                bp = ax.boxplot(dados_limpos, patch_artist=True, labels=labels_limpos)
-                for i, patch in enumerate(bp['boxes']): 
-                    grp_name = labels_limpos[i].split('(')[0] if '(' in labels_limpos[i] else labels_limpos[i]
-                    patch.set_facecolor('#d3d3d3' if 'control' in grp_name.lower() else ('#707070' if 'parkinson' in grp_name.lower() else '#999999'))
-                for median in bp['medians']: median.set(color='black', linewidth=2)
-                for i, d in enumerate(dados_limpos):
-                    media, dp, mediana = np.mean(d), np.std(d), np.median(d)
-                    ax.text(i + 1.10, mediana, f"M: {media:.1f}\nDP: {dp:.1f}", ha='left', va='center', fontsize=10, fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.3'))
-                ax.set_xlim(0.5, len(dados_limpos) + 0.9)
-                ymin, ymax = ax.get_ylim(); ax.set_ylim(ymin - (ymax-ymin)*0.1, ymax + (ymax-ymin)*0.1)
-                ax.set_title(titulo, fontweight='bold', fontsize=14); ax.set_ylabel(ylabel, fontsize=12)
-                ax.grid(True, linestyle='--', alpha=0.5)
-            plt.tight_layout(); return fig
-
-        dict_vel = {g: v_vel[g] for g in grupos_estudo}
-        dict_ap = {}; dict_fc = {}; dict_ps = {}; dict_ps_norm = {}
-        for g in grupos_estudo:
-            dict_ap[f"{g}(D)"] = v_ap_d[g]; dict_ap[f"{g}(E)"] = v_ap_e[g]
-            dict_fc[f"{g}(D)"] = v_fc_d[g]; dict_fc[f"{g}(E)"] = v_fc_e[g]
-            dict_ps[f"{g}(D)"] = v_ps_d[g]; dict_ps[f"{g}(E)"] = v_ps_e[g]
-            dict_ps_norm[f"{g}(D)"] = v_ps_norm_d[g]; dict_ps_norm[f"{g}(E)"] = v_ps_norm_e[g]
-            
-        col_box1, col_box2 = st.columns(2)
-        with col_box1:
-            fig1 = gerar_boxplot_isolado(dict_vel, "Velocidade Média", "m/s"); st.pyplot(fig1); plt.close(fig1)
-            fig2 = gerar_boxplot_isolado(dict_fc, "Foot Clearance", "mm"); st.pyplot(fig2); plt.close(fig2)
-        with col_box2:
-            fig3 = gerar_boxplot_isolado(dict_ap, "Fase de Apoio", "% do Ciclo"); st.pyplot(fig3); plt.close(fig3)
-            fig4 = gerar_boxplot_isolado(dict_ps, "Comprimento do Passo (Absoluto)", "mm"); st.pyplot(fig4); plt.close(fig4)
-            
-        st.markdown("---")
-        col_box3, col_box4 = st.columns(2)
-        with col_box3:
-            fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"); st.pyplot(fig5); plt.close(fig5)
+        v_vel = {g: [] for g in grupos_estudo}; v_ap_d = {g: [] for g in grupos_estudo}; v_ap_e = {g: [] for g in grupos_estudo
