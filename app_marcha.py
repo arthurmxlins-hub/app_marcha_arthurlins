@@ -399,7 +399,7 @@ st.title("🚶 GPBIO - Sistema de Análise de Marcha")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📏 Dados Antropométricos")
-st.sidebar.info("Planilha com colunas 'ID' e 'Altura' (em metros). O ID deve bater com as iniciais do arquivo C3D.")
+st.sidebar.info("Planilha com colunas 'ID' e 'Altura' (em metros).")
 arquivo_antropo = st.sidebar.file_uploader("Planilha de Altura (Excel/CSV)", type=['xlsx', 'csv'])
 
 df_antropo = None
@@ -411,7 +411,7 @@ if arquivo_antropo:
         df_antropo['ID'] = df_antropo['ID'].astype(str).str.upper().str.strip()
         st.sidebar.success(f"Dados de {len(df_antropo)} participantes prontos!")
     else:
-        st.sidebar.error("Erro nas colunas. Falta ID ou ALTURA.")
+        st.sidebar.error("Erro nas colunas.")
         df_antropo = None
 
 st.sidebar.markdown("---")
@@ -421,7 +421,7 @@ st.sidebar.markdown("**Desenvolvido por Arthur Lins**")
 	
 if 'processadores' not in st.session_state: st.session_state.processadores = []
 
-st.subheader("📁 Importação de Dados e Separação de Grupos")
+st.subheader("📁 Importação de Dados")
 col_g1, col_g2 = st.columns(2)
 with col_g1:
     nome_g1 = st.text_input("Nome do Grupo 1", value="Controle")
@@ -436,7 +436,7 @@ if st.button("Processar Arquivos", type="primary", use_container_width=True):
     if files_g2: arquivos_para_processar.extend([(f, nome_g2) for f in files_g2 if "CAL" not in f.name.upper()])
 
     if not arquivos_para_processar:
-        st.warning("Faça o upload de arquivos dinâmicos.")
+        st.warning("Faça o upload.")
     else:
         st.session_state.processadores = []
         progress_bar = st.progress(0)
@@ -453,7 +453,7 @@ if st.button("Processar Arquivos", type="primary", use_container_width=True):
             except Exception: pass 
             progress_bar.progress((i + 1) / len(arquivos_para_processar))
             
-        st.success(f"✅ {len(st.session_state.processadores)} arquivos processados!")
+        st.success(f"✅ {len(st.session_state.processadores)} processados!")
 
 if st.session_state.processadores:
     grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
@@ -461,11 +461,10 @@ if st.session_state.processadores:
     
     def obter_estilo(grp, idx):
         g = grp.lower()
-        if 'control' in g: return 'black', '-', 1.2
-        if 'parkinson' in g: return 'black', '--', 1.2
-        return cores_comp[idx % len(cores_comp)], '--', 1.2
+        if 'control' in g: return 'black', '-', 1.5
+        if 'parkinson' in g: return 'black', '--', 1.5
+        return cores_comp[idx % len(cores_comp)], '--', 1.5
 
-    # Lógica de cálculo contínuo para Coupling Angle (Vector Coding)
     def calcular_ca_serie(prox_cics, dist_cics):
         cas = []
         for cp, cd in zip(prox_cics, dist_cics):
@@ -519,9 +518,9 @@ if st.session_state.processadores:
                 dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(cics_coxa, cics_perna))
                 dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(cics_perna, cics_pe))
 
-    tab1, tab2, tab_ca, tab3, tab4, tab5 = st.tabs([
-        "📊 Tabela de Médias", "📈 Cinemática Art/Seg", "📈 Coupling Angle", "⚙️ Coordenação Vetorial", 
-        "🎥 Animações 3D", "📦 Estatística"
+    tab1, tab2, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
+        "📊 Tabela", "📈 Cinemática", "🔄 Angle-Angle", "📈 Coupling Angle", 
+        "📊 Freq. Coordenação", "🎥 Animações 3D", "📦 Estatística"
     ])
 
     with tab1:
@@ -679,6 +678,119 @@ if st.session_state.processadores:
                         if ciclos: ax.plot(x_axis_perc, np.mean(ciclos, axis=0), color=cor, linestyle=ls, lw=lw); ax.axhline(0, color='black', lw=0.8)
                     plt.tight_layout(); st.pyplot(fig_ind); plt.close(fig_ind)
 
+    with tab_aa:
+        st.subheader("🔄 Diagramas Angle-Angle (Ciclogramas Espaciais)")
+        st.markdown("O diagrama Angle-Angle plota o deslocamento angular do segmento proximal (eixo X) contra o distal (eixo Y). O **ponto verde** indica o Contato Inicial (0%) e o **'X' laranja** indica o Toe-Off (~60%).")
+        
+        sub_aa1, sub_aa2, sub_aa3, sub_aa4 = st.tabs([
+            "🟢 Padrão Normativo (Controle)", 
+            "⚖️ Comparação Articular", 
+            "⚖️ Comparação Segmentar",
+            "🔍 Curvas Individuais por Lado"
+        ])
+
+        with sub_aa1:
+            st.markdown("<h5 style='text-align:center;'>Média Bilateral Isolada - Grupo Controle</h5>", unsafe_allow_html=True)
+            grupo_controle = [g for g in grupos_estudo if 'control' in g.lower()]
+            if grupo_controle:
+                grp = grupo_controle[0]
+                fig_aa_ctrl, axs_aa_ctrl = plt.subplots(2, 2, figsize=(9, 9))
+                pares_norm_aa = [
+                    (axs_aa_ctrl[0,0], 'Quad', 'Joel', 'Art', 'Quadril (°)', 'Joelho (°)'),
+                    (axs_aa_ctrl[0,1], 'Joel', 'Torn', 'Art', 'Joelho (°)', 'Tornozelo (°)'),
+                    (axs_aa_ctrl[1,0], 'Coxa', 'Perna', 'Seg', 'Coxa (°)', 'Perna (°)'),
+                    (axs_aa_ctrl[1,1], 'Perna', 'Pe', 'Seg', 'Perna (°)', 'Pé (°)')
+                ]
+                
+                for ax, x_k, y_k, tipo, label_x, label_y in pares_norm_aa:
+                    x_cics = dados_curvas[grp][tipo][f"{x_k}_D"] + dados_curvas[grp][tipo][f"{x_k}_E"]
+                    y_cics = dados_curvas[grp][tipo][f"{y_k}_D"] + dados_curvas[grp][tipo][f"{y_k}_E"]
+                    if x_cics and y_cics:
+                        x_mean, y_mean = np.mean(np.array(x_cics), axis=0), np.mean(np.array(y_cics), axis=0)
+                        ax.plot(x_mean, y_mean, color='black', lw=1.5)
+                        ax.scatter(x_mean[0], y_mean[0], color='green', s=40, zorder=5)
+                        ax.scatter(x_mean[60], y_mean[60], color='orange', marker='X', s=40, zorder=5)
+                    ax.set_xlabel(label_x, fontsize=9); ax.set_ylabel(label_y, fontsize=9)
+                    ax.set_title(f"{x_k}-{y_k}", fontweight='bold', fontsize=11)
+                    ax.grid(True, linestyle='--', alpha=0.5)
+                plt.tight_layout(); st.pyplot(fig_aa_ctrl); plt.close(fig_aa_ctrl)
+            else:
+                st.info("⚠️ Nenhum grupo com o termo 'Controle' foi detectado.")
+
+        with sub_aa2:
+            st.markdown("<h5 style='text-align:center;'>Comparativo Articular Bilateral</h5>", unsafe_allow_html=True)
+            fig_aa_art, axs_aa_art = plt.subplots(1, 2, figsize=(10, 5))
+            pares_comp_art = [(axs_aa_art[0], 'Quad', 'Joel', 'Quadril (°)', 'Joelho (°)'), (axs_aa_art[1], 'Joel', 'Torn', 'Joelho (°)', 'Tornozelo (°)')]
+
+            for ax, x_k, y_k, label_x, label_y in pares_comp_art:
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.set_title(f"{x_k}-{y_k}", fontweight='bold', fontsize=11)
+                ax.set_xlabel(label_x, fontsize=9); ax.set_ylabel(label_y, fontsize=9)
+                
+                for idx, grp in enumerate(grupos_estudo):
+                    x_cics = dados_curvas[grp]['Art'][f"{x_k}_D"] + dados_curvas[grp]['Art'][f"{x_k}_E"]
+                    y_cics = dados_curvas[grp]['Art'][f"{y_k}_D"] + dados_curvas[grp]['Art'][f"{y_k}_E"]
+                    if x_cics and y_cics:
+                        cor, ls, lw = obter_estilo(grp, idx)
+                        x_mean, y_mean = np.mean(np.array(x_cics), axis=0), np.mean(np.array(y_cics), axis=0)
+                        ax.plot(x_mean, y_mean, label=grp, color=cor, linestyle=ls, lw=1.5)
+                        ax.scatter(x_mean[0], y_mean[0], color='green', s=30, zorder=5)
+                        ax.scatter(x_mean[60], y_mean[60], color='orange', marker='X', s=30, zorder=5)
+                ax.legend(loc='best')
+            plt.tight_layout(); st.pyplot(fig_aa_art); plt.close(fig_aa_art)
+
+        with sub_aa3:
+            st.markdown("<h5 style='text-align:center;'>Comparativo Segmentar Bilateral</h5>", unsafe_allow_html=True)
+            fig_aa_seg, axs_aa_seg = plt.subplots(1, 2, figsize=(10, 5))
+            pares_comp_seg = [(axs_aa_seg[0], 'Coxa', 'Perna', 'Coxa (°)', 'Perna (°)'), (axs_aa_seg[1], 'Perna', 'Pe', 'Perna (°)', 'Pé (°)')]
+
+            for ax, x_k, y_k, label_x, label_y in pares_comp_seg:
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.set_title(f"{x_k}-{y_k}", fontweight='bold', fontsize=11)
+                ax.set_xlabel(label_x, fontsize=9); ax.set_ylabel(label_y, fontsize=9)
+                
+                for idx, grp in enumerate(grupos_estudo):
+                    x_cics = dados_curvas[grp]['Seg'][f"{x_k}_D"] + dados_curvas[grp]['Seg'][f"{x_k}_E"]
+                    y_cics = dados_curvas[grp]['Seg'][f"{y_k}_D"] + dados_curvas[grp]['Seg'][f"{y_k}_E"]
+                    if x_cics and y_cics:
+                        cor, ls, lw = obter_estilo(grp, idx)
+                        x_mean, y_mean = np.mean(np.array(x_cics), axis=0), np.mean(np.array(y_cics), axis=0)
+                        ax.plot(x_mean, y_mean, label=grp, color=cor, linestyle=ls, lw=1.5)
+                        ax.scatter(x_mean[0], y_mean[0], color='green', s=30, zorder=5)
+                        ax.scatter(x_mean[60], y_mean[60], color='orange', marker='X', s=30, zorder=5)
+                ax.legend(loc='best')
+            plt.tight_layout(); st.pyplot(fig_aa_seg); plt.close(fig_aa_seg)
+
+        with sub_aa4:
+            cols_ind_aa = st.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_ind_aa[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
+                    fig_ind_aa, axs_ind_aa = plt.subplots(4, 2, figsize=(7, 14))
+                    mapeamento_aa_ind = [
+                        (axs_ind_aa[0,0], 'Quad_D', 'Joel_D', 'Art', 'Quad(°)', 'Joel(°) (DIR)'), 
+                        (axs_ind_aa[0,1], 'Quad_E', 'Joel_E', 'Art', 'Quad(°)', 'Joel(°) (ESQ)'),
+                        (axs_ind_aa[1,0], 'Joel_D', 'Torn_D', 'Art', 'Joel(°)', 'Torn(°) (DIR)'), 
+                        (axs_ind_aa[1,1], 'Joel_E', 'Torn_E', 'Art', 'Joel(°)', 'Torn(°) (ESQ)'),
+                        (axs_ind_aa[2,0], 'Coxa_D', 'Perna_D', 'Seg', 'Coxa(°)', 'Perna(°) (DIR)'), 
+                        (axs_ind_aa[2,1], 'Coxa_E', 'Perna_E', 'Seg', 'Coxa(°)', 'Perna(°) (ESQ)'),
+                        (axs_ind_aa[3,0], 'Perna_D', 'Pe_D', 'Seg', 'Perna(°)', 'Pé(°) (DIR)'), 
+                        (axs_ind_aa[3,1], 'Perna_E', 'Pe_E', 'Seg', 'Perna(°)', 'Pé(°) (ESQ)')
+                    ]
+                    
+                    cor, ls, lw = obter_estilo(grp, idx)
+
+                    for ax, x_k, y_k, tipo, lx, ly in mapeamento_aa_ind:
+                        x_cics, y_cics = dados_curvas[grp][tipo][x_k], dados_curvas[grp][tipo][y_k]
+                        if x_cics and y_cics:
+                            xm, ym = np.mean(x_cics, axis=0), np.mean(y_cics, axis=0)
+                            ax.plot(xm, ym, color=cor, linestyle=ls, lw=1.5)
+                            ax.scatter(xm[0], ym[0], color='green', s=30, zorder=5)
+                            ax.scatter(xm[60], ym[60], color='orange', marker='X', s=30, zorder=5)
+                        ax.set_xlabel(lx, fontsize=8); ax.set_ylabel(ly, fontsize=8)
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                    plt.tight_layout(); st.pyplot(fig_ind_aa); plt.close(fig_ind_aa)
+
     with tab_ca:
         st.subheader("📈 Coupling Angle - Séries Temporais em Tempo (s)")
         sub_ca1, sub_ca2, sub_ca3, sub_ca4 = st.tabs(["🟢 Normativo (Controle)", "⚖️ Comparação Articular", "⚖️ Comparação Segmentar", "🔍 Curvas Individuais"])
@@ -756,10 +868,9 @@ if st.session_state.processadores:
                         if ciclos: ax.plot(x_tempo, media_circular(ciclos), color=cor, linestyle=ls, lw=lw)
                     plt.tight_layout(); st.pyplot(fig_ind_ca); plt.close(fig_ind_ca)
 
-    with tab3:
-        st.subheader("⚙️ Coordenação Vetorial e Frequência de Ocorrência")
+    with tab_freq:
+        st.subheader("📊 Frequência de Coordenação Vetorial (Vector Coding)")
         
-        # Padrões Preto e Branco para Publicação (Grayscale + Hatches)
         bw_padroes = {
             'Proximal': {'cor': '#ffffff', 'hatch': '///'},
             'EmFase':   {'cor': '#cccccc', 'hatch': '\\\\\\'},
@@ -787,7 +898,6 @@ if st.session_state.processadores:
                     if not np.isnan(freqs.get(k, np.nan)): freq_acumulada[grp][c_new][k].append(freqs[k])
                     
         def compilar_frequencia_bilateral(grupos, pares_origem, inicio, fim):
-            # Retorna dict: {grupo: {padrao: valor_medio}}
             dados = {g: {k: 0 for k in bw_padroes} for g in grupos}
             for grp in grupos:
                 m_prox, m_fase, m_dist, m_anti, contagem = 0, 0, 0, 0, 0
@@ -844,7 +954,7 @@ if st.session_state.processadores:
             axs_bal[1].legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Modos")
             plt.tight_layout(); st.pyplot(fig_bal); plt.close(fig_bal)
 
-    with tab4:
+    with tab_anim:
         st.subheader("Gerador de GIFs e Biofeedback Visual")
         st.info("Escolha os arquivos que deseja animar e a velocidade de reprodução.")
         lista_nomes = [p.nome_arq for p in st.session_state.processadores]
@@ -865,7 +975,7 @@ if st.session_state.processadores:
                             with open(tmp_gif_path, "rb") as file_gif: st.download_button(f"📥 Baixar GIF", data=file_gif, file_name=f"{p.nome_arq.split('.')[0]}_3D.gif", mime="image/gif")
                         else: st.error(f"Falha: {msg}")
 
-    with tab5:
+    with tab_est:
         st.subheader("Estatística Espaço-Temporal")
         v_vel = {g: [] for g in grupos_estudo}; v_ap_d = {g: [] for g in grupos_estudo}; v_ap_e = {g: [] for g in grupos_estudo}
         v_fc_d = {g: [] for g in grupos_estudo}; v_fc_e = {g: [] for g in grupos_estudo}
