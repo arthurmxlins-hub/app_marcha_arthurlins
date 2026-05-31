@@ -222,7 +222,19 @@ class ProcessadorCinematico:
 
     def _calcular_coordenacao_vetorial(self):
         res = {}; self.coord_vetorial_series = {} 
-        for nome_par, col_prox, col_dist, df_ref in pares:
+        for lado in ['D', 'E']:
+            hss = self.eventos[lado]['HS']
+            if len(hss) < 2: continue
+            
+            # --- AQUI ESTÁ A DEFINIÇÃO DE 'pares' ---
+            pares = [
+                (f'Quad_Joel_{lado}', f'Quad_{lado}', f'Joel_{lado}', self.angulos_df),
+                (f'Joel_Torn_{lado}', f'Joel_{lado}', f'Torn_{lado}', self.angulos_df),
+                (f'Coxa_Perna_{lado}', f'Coxa_{lado}', f'Perna_{lado}', self.segmentos_df),
+                (f'Perna_Pe_{lado}', f'Perna_{lado}', f'Pe_{lado}', self.segmentos_df)
+            ]
+            
+            for nome_par, col_prox, col_dist, df_ref in pares:
                 # Cálculo ORIGINAL sobre os dados contínuos para evitar distorção da derivada
                 raw_prox = df_ref[col_prox].values
                 raw_dist = df_ref[col_dist].values
@@ -247,6 +259,8 @@ class ProcessadorCinematico:
                 for i in range(len(hss) - 1):
                     if hss[i+1] > len(ca_cont): continue
                     ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+                    
+                    if len(ciclo_ca) == 0: continue
                     
                     # Interpolação circular para manter a normalização
                     rad = np.radians(ciclo_ca)
