@@ -284,7 +284,7 @@ class GeradorVisual:
         if rias is not None and lias is not None: s['P_F']=[rias,lias]
         if rips is not None and lips is not None: s['P_B']=[rips,lips]
         if rias is not None and rict is not None: s['PR1']=[rias,rict]
-        if rips is not None and rict is not None: s['PR2']=[rips,rict] 
+        if rips is not None and rict is not None: s['PR2']=[rias,rict] 
         if lias is not None and lict is not None: s['PL1']=[lias,lict]
         if lips is not None and lict is not None: s['PL2']=[lips,lict] 
         
@@ -411,7 +411,7 @@ if arquivo_antropo:
         df_antropo['ID'] = df_antropo['ID'].astype(str).str.upper().str.strip()
         st.sidebar.success(f"Dados de {len(df_antropo)} participantes prontos!")
     else:
-        st.sidebar.error("Erro nas colunas.")
+        st.sidebar.error("Erro nas colunas. Falta ID ou ALTURA.")
         df_antropo = None
 
 st.sidebar.markdown("---")
@@ -421,7 +421,7 @@ st.sidebar.markdown("**Desenvolvido por Arthur Lins**")
 	
 if 'processadores' not in st.session_state: st.session_state.processadores = []
 
-st.subheader("📁 Importação de Dados")
+st.subheader("📁 Importação de Dados e Separação de Grupos")
 col_g1, col_g2 = st.columns(2)
 with col_g1:
     nome_g1 = st.text_input("Nome do Grupo 1", value="Controle")
@@ -436,7 +436,7 @@ if st.button("Processar Arquivos", type="primary", use_container_width=True):
     if files_g2: arquivos_para_processar.extend([(f, nome_g2) for f in files_g2 if "CAL" not in f.name.upper()])
 
     if not arquivos_para_processar:
-        st.warning("Faça o upload.")
+        st.warning("Faça o upload de arquivos dinâmicos.")
     else:
         st.session_state.processadores = []
         progress_bar = st.progress(0)
@@ -453,7 +453,7 @@ if st.button("Processar Arquivos", type="primary", use_container_width=True):
             except Exception: pass 
             progress_bar.progress((i + 1) / len(arquivos_para_processar))
             
-        st.success(f"✅ {len(st.session_state.processadores)} processados!")
+        st.success(f"✅ {len(st.session_state.processadores)} arquivos processados!")
 
 if st.session_state.processadores:
     grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
@@ -461,9 +461,9 @@ if st.session_state.processadores:
     
     def obter_estilo(grp, idx):
         g = grp.lower()
-        if 'control' in g: return 'black', '-', 1.5
-        if 'parkinson' in g: return 'black', '--', 1.5
-        return cores_comp[idx % len(cores_comp)], '--', 1.5
+        if 'control' in g: return 'black', '-', 1.2
+        if 'parkinson' in g: return 'black', '--', 1.2
+        return cores_comp[idx % len(cores_comp)], '--', 1.2
 
     def calcular_ca_serie(prox_cics, dist_cics):
         cas = []
@@ -499,9 +499,11 @@ if st.session_state.processadores:
                 
             for lado in ['D', 'E']:
                 hss = p.eventos[lado]['HS']
+                
                 cics_quad = p.extrair_ciclos_normalizados(p.angulos_df[f"Quad_{lado}"].values, hss)
                 cics_joel = p.extrair_ciclos_normalizados(p.angulos_df[f"Joel_{lado}"].values, hss)
                 cics_torn = p.extrair_ciclos_normalizados(p.angulos_df[f"Torn_{lado}"].values, hss)
+                
                 cics_coxa = p.extrair_ciclos_normalizados(p.segmentos_df[f"Coxa_{lado}"].values, hss)
                 cics_perna = p.extrair_ciclos_normalizados(p.segmentos_df[f"Perna_{lado}"].values, hss)
                 cics_pe = p.extrair_ciclos_normalizados(p.segmentos_df[f"Pe_{lado}"].values, hss)
@@ -509,6 +511,7 @@ if st.session_state.processadores:
                 dados_curvas[grp]['Art'][f"Quad_{lado}"].extend(cics_quad)
                 dados_curvas[grp]['Art'][f"Joel_{lado}"].extend(cics_joel)
                 dados_curvas[grp]['Art'][f"Torn_{lado}"].extend(cics_torn)
+                
                 dados_curvas[grp]['Seg'][f"Coxa_{lado}"].extend(cics_coxa)
                 dados_curvas[grp]['Seg'][f"Perna_{lado}"].extend(cics_perna)
                 dados_curvas[grp]['Seg'][f"Pe_{lado}"].extend(cics_pe)
@@ -871,10 +874,11 @@ if st.session_state.processadores:
     with tab_freq:
         st.subheader("📊 Frequência de Coordenação Vetorial (Vector Coding)")
         
+        # Padrões de Plotagem Pretos e Brancos (Publicação)
         bw_padroes = {
-            'Proximal': {'cor': '#ffffff', 'hatch': '///'},
-            'EmFase':   {'cor': '#cccccc', 'hatch': '\\\\\\'},
-            'Distal':   {'cor': '#777777', 'hatch': '...'},
+            'Proximal': {'cor': '#ffffff', 'hatch': '////'},
+            'EmFase':   {'cor': '#cccccc', 'hatch': '\\\\\\\\'},
+            'Distal':   {'cor': '#777777', 'hatch': '....'},
             'AntiFase': {'cor': '#222222', 'hatch': ''}
         }
         
