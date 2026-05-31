@@ -235,21 +235,22 @@ class ProcessadorCinematico:
             ]
             
             for nome_par, col_prox, col_dist, df_ref in pares:
-                # Cálculo ORIGINAL sobre os dados contínuos para evitar distorção da derivada
+                
                 raw_prox = df_ref[col_prox].values
                 raw_dist = df_ref[col_dist].values
                 
-                # --- PROTEÇÃO CONTRA MATRIZ VAZIA ---
+                
                 if len(raw_prox) < 2 or len(raw_dist) < 2:
                     continue
                 
-                ca_cont = np.mod(np.degrees(np.arctan2(np.diff(raw_dist), np.diff(raw_prox))), 360)
+                
+                ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(raw_dist), -np.diff(raw_prox))), 360)
                 
                 if len(ca_cont) > 0:
                     ca_cont = np.append(ca_cont, ca_cont[-1])
                 else:
                     continue
-                # ------------------------------------
+                -
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
@@ -492,20 +493,20 @@ if st.session_state.processadores:
         if 'control' in g: return 'black', '-', 1.2
         if 'parkinson' in g: return 'black', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
-
-    # Nova função que calcula a diferença matemática nas matrizes contínuas 
+ 
     def calcular_ca_serie(prox_raw, dist_raw, hss):
-        # --- PROTEÇÃO CONTRA MATRIZ VAZIA ---
+        
         if len(prox_raw) < 2 or len(dist_raw) < 2:
             return []
             
-        ca_cont = np.mod(np.degrees(np.arctan2(np.diff(dist_raw), np.diff(prox_raw))), 360)
+        
+        ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(dist_raw), -np.diff(prox_raw))), 360)
         
         if len(ca_cont) > 0:
             ca_cont = np.append(ca_cont, ca_cont[-1])
         else:
             return []
-        # ------------------------------------
+        
         
         cas = []
         if len(hss) < 2: return []
@@ -753,12 +754,10 @@ if st.session_state.processadores:
                 perna = proc.segmentos_df[f'Perna_{l}'].values[start:end]
                 pe = proc.segmentos_df[f'Pe_{l}'].values[start:end]
 
-                # FÓRMULA ORIGINAL do Coupling Angle
-                # Thigh-Shank: Shank (Y) and Thigh (X)
-                ca_cp = np.mod(np.degrees(np.arctan2(np.diff(perna), np.diff(coxa))), 360)
+                ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(perna), -np.diff(coxa))), 360)
                 ca_cp = np.append(ca_cp, ca_cp[-1])
                 # Shank-Foot: Foot (Y) and Shank (X)
-                ca_pp = np.mod(np.degrees(np.arctan2(np.diff(pe), np.diff(perna))), 360)
+                ca_pp = np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(perna))), 360)
                 ca_pp = np.append(ca_pp, ca_pp[-1])
 
                 fig_paper = plt.figure(figsize=(12, 12))
