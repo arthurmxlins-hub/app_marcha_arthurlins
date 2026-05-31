@@ -222,13 +222,14 @@ class ProcessadorCinematico:
         return res
 
     def extrair_ciclos_normalizados(self, vetor_dados, eventos_hs, eventos_to=None, pontos=101):
-        """ Normalização temporal particionada 60-40 (Apoio-Balanço) baseada nos eventos Zeni """
+        """ Normalização temporal particionada 60-40 (Apoio-Balanço) com cast seguro para int """
         ciclos = []
         if len(eventos_hs) < 2: return []
         
-        idx_to_norm = int(round((pontos - 1) * 0.60)) # 60
-        pts_apoio = idx_to_norm + 1 # 61 (0-60%)
-        pts_balanco = pontos - idx_to_norm # 41 (60-100%)
+        pontos = int(pontos)
+        idx_to_norm = int(round((pontos - 1) * 0.60))
+        pts_apoio = int(idx_to_norm + 1)
+        pts_balanco = int(pontos - idx_to_norm)
         
         for i in range(len(eventos_hs) - 1):
             hs_atual = eventos_hs[i]
@@ -242,19 +243,15 @@ class ProcessadorCinematico:
                     to_valido = tos_no_ciclo[0]
             
             if to_valido is not None and hs_atual < to_valido < hs_prox:
-                # Interpolação da Fase de Apoio
                 fase_apoio = vetor_dados[hs_atual:to_valido+1] 
                 fase_apoio_norm = np.interp(np.linspace(0, len(fase_apoio)-1, pts_apoio), np.arange(len(fase_apoio)), fase_apoio)
                 
-                # Interpolação da Fase de Balanço
                 fase_balanco = vetor_dados[to_valido:hs_prox+1]
                 fase_balanco_norm = np.interp(np.linspace(0, len(fase_balanco)-1, pts_balanco), np.arange(len(fase_balanco)), fase_balanco)
                 
-                # Aglutina (removendo o primeiro frame redundante do balanço que é o próprio TO)
                 ciclo_norm = np.concatenate((fase_apoio_norm, fase_balanco_norm[1:]))
                 ciclos.append(ciclo_norm)
             else:
-                # Fallback: interpolação linear padrão se o TO estiver ausente/corrompido
                 ciclo_bruto = vetor_dados[hs_atual:hs_prox+1]
                 if len(ciclo_bruto) < 2: continue
                 ciclos.append(np.interp(np.linspace(0, len(ciclo_bruto)-1, pontos), np.arange(len(ciclo_bruto)), ciclo_bruto))
@@ -281,7 +278,7 @@ class ProcessadorCinematico:
                 if len(raw_prox) < 2 or len(raw_dist) < 2:
                     continue
                 
-                # Inversão vetorial (-np.diff) do artigo
+                # Inversão vetorial (-np.diff)
                 ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(raw_dist), -np.diff(raw_prox))), 360)
                 
                 if len(ca_cont) > 0:
@@ -302,7 +299,6 @@ class ProcessadorCinematico:
                     tos_no_ciclo = [t for t in tos if hs_atual < t < hs_prox]
                     if tos_no_ciclo: to_valido = tos_no_ciclo[0]
                     
-                    # Aplicação da Normalização Bipartida em Domínio Circular
                     if to_valido is not None and hs_atual < to_valido < hs_prox:
                         fase_ap = ca_cont[hs_atual:to_valido+1]
                         rad_ap = np.radians(fase_ap)
@@ -549,7 +545,7 @@ if st.session_state.processadores:
         if 'parkinson' in g: return 'grey', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
 
-    # Normalização em Espaço Circular Bipartida (Apoio-Balanço)
+    # Normalização em Espaço Circular Bipartida (Apoio-Balanço) c/ Proteção int()
     def calcular_ca_serie(prox_raw, dist_raw, hss, tos=None):
         if len(prox_raw) < 2 or len(dist_raw) < 2: return []
             
