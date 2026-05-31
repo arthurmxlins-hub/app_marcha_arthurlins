@@ -246,8 +246,11 @@ class ProcessadorCinematico:
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
                 
+                cas = [] # Array para guardar todos os Coupling Angles de cada ciclo
+                
                 for cp, cd in zip(c_prox, c_dist):
                     angulos = np.mod(np.degrees(np.arctan2(np.diff(cd), np.diff(cp))), 360)
+                    cas.append(angulos)
                     counts = {'Proximal': 0, 'Distal': 0, 'EmFase': 0, 'AntiFase': 0}
                     for a in angulos:
                         if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): counts['Proximal'] += 1
@@ -257,8 +260,12 @@ class ProcessadorCinematico:
                     for k in counts: freqs[k].append((counts[k] / len(angulos)) * 100)
                 for k in freqs: res[nome_par][k] = np.mean(freqs[k])
                 
-                c_prox_m, c_dist_m = np.mean(c_prox, axis=0), np.mean(c_dist, axis=0)
-                ang_m = np.mod(np.degrees(np.arctan2(np.diff(c_dist_m), np.diff(c_prox_m))), 360)
+                # CORREÇÃO: Utilizando a Estatística Circular (Batschelet, 1981) para a média dos padrões
+                rad = np.radians(np.array(cas))
+                s_m = np.nanmean(np.sin(rad), axis=0)
+                c_m = np.nanmean(np.cos(rad), axis=0)
+                ang_m = np.mod(np.degrees(np.arctan2(s_m, c_m)), 360)
+                
                 fatia_media = []
                 for a in ang_m:
                     if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): fatia_media.append('Proximal')
@@ -418,7 +425,7 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### Sobre o Sistema")
 st.sidebar.info("GPBIO: Análise Biomecânica de Marcha.")
 st.sidebar.markdown("**Desenvolvido por Arthur Lins**")
-	
+    
 if 'processadores' not in st.session_state: st.session_state.processadores = []
 
 st.subheader("📁 Importação de Dados e Separação de Grupos")
@@ -577,8 +584,13 @@ if st.session_state.processadores:
                         else: linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
 
                         serie = p.coord_vetorial_series.get(par_key, [])
-                        fatia_apoio = serie[0:60] if len(serie) >= 60 else []
-                        fatia_balanco = serie[60:] if len(serie) > 60 else []
+                        
+                        # CORREÇÃO: Utilizando a porcentagem real de apoio em vez de cravado em 60%
+                        pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
+                        idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
+                        
+                        fatia_apoio = serie[0:idx_apoio] if len(serie) >= idx_apoio else []
+                        fatia_balanco = serie[idx_apoio:] if len(serie) > idx_apoio else []
 
                         for padrao in padroes:
                             linha[f"APOIO {par_label} - {padrao} (%)"] = (fatia_apoio.count(padrao) / len(fatia_apoio)) * 100 if len(fatia_apoio) > 0 else np.nan
@@ -901,13 +913,23 @@ if st.session_state.processadores:
                 for k in bw_padroes.keys():
                     if not np.isnan(freqs.get(k, np.nan)): freq_acumulada[grp][c_new][k].append(freqs[k])
                     
-        def compilar_frequencia_bilateral(grupos, pares_origem, inicio, fim):
+        # CORREÇÃO: Utilizando os recortes dinâmicos de Apoio/Balanço para cada paciente.
+        def compilar_frequencia_bilateral(grupos, pares_origem, fase="Apoio"):
             dados = {g: {k: 0 for k in bw_padroes} for g in grupos}
             for grp in grupos:
                 m_prox, m_fase, m_dist, m_anti, contagem = 0, 0, 0, 0, 0
                 for p in [proc for proc in st.session_state.processadores if proc.grupo == grp]:
                     for par_chave in pares_origem:
-                        fatia = p.coord_vetorial_series.get(par_chave, [])[inicio:fim]
+                        lado = par_chave.split('_')[-1]
+                        pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
+                        idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
+                        
+                        serie_completa = p.coord_vetorial_series.get(par_chave, [])
+                        if fase == "Apoio":
+                            fatia = serie_completa[:idx_apoio]
+                        else:
+                            fatia = serie_completa[idx_apoio:]
+                            
                         total = len(fatia)
                         if total > 0:
                             m_prox += fatia.count('Proximal')/total; m_fase += fatia.count('EmFase')/total
@@ -921,7 +943,7 @@ if st.session_state.processadores:
             return dados
 
         st.markdown("### Frequência dos Modos de Coordenação (Média Bilateral)")
-        sub_freq_apoio, sub_freq_balanco = st.tabs(["🦵 Fase de Apoio (0-60%)", "✈️ Fase de Balanço (60-100%)"])
+        sub_freq_apoio, sub_freq_balanco = st.tabs(["🦵 Fase de Apoio", "✈️ Fase de Balanço"])
         
         def plotar_histograma_p_b(ax, dados_comp, titulo):
             grps = list(dados_comp.keys())
@@ -945,7 +967,7 @@ if st.session_state.processadores:
         with sub_freq_apoio:
             fig_ap, axs_ap = plt.subplots(1, 2, figsize=(12, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
-                dados_ap = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], 0, 60)
+                dados_ap = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Apoio")
                 plotar_histograma_p_b(axs_ap[i], dados_ap, f"{p_nome} (Apoio)")
             axs_ap[1].legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Modos")
             plt.tight_layout(); st.pyplot(fig_ap); plt.close(fig_ap)
@@ -953,7 +975,7 @@ if st.session_state.processadores:
         with sub_freq_balanco:
             fig_bal, axs_bal = plt.subplots(1, 2, figsize=(12, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
-                dados_bal = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], 60, 100)
+                dados_bal = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Balanco")
                 plotar_histograma_p_b(axs_bal[i], dados_bal, f"{p_nome} (Balanço)")
             axs_bal[1].legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Modos")
             plt.tight_layout(); st.pyplot(fig_bal); plt.close(fig_bal)
