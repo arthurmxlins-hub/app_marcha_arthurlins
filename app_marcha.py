@@ -150,7 +150,7 @@ class ProcessadorCinematico:
         rias_data, lias_data = self._get('RIAS', slice(None)), self._get('LIAS', slice(None))
         if rias_data is None or lias_data is None: return eventos 
         pelvis_x = (rias_data[0] + lias_data[0]) / 2
-        dist_frames = int(self.freq * 0.35)
+        dist_frames = int(self.freq * 0.6)
         
         for lado, cal_label, toe_label in [('D','RCAL','RFT1'), ('E','LCAL','LFT1')]:
             cal_x_data, toe_x_data = self._get(cal_label, slice(None)), self._get(toe_label, slice(None))
