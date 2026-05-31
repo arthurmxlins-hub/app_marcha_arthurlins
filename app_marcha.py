@@ -23,27 +23,25 @@ st.set_page_config(page_title="GPBIO - Biomecânica Clínica", layout="wide", pa
 # =============================================================================
 def ang_sagital(p_prox, p_dist, tipo='vertical'):
     """
-    Calcula o ângulo absoluto do segmento no plano sagital preservando o sinal.
-    - X cresce no eixo de progressão (para frente).
-    - Z cresce para cima (vertical).
+    Calcula o ângulo absoluto do segmento no plano sagital.
+    O sinal é invertido (-) no retorno para garantir que o padrão visual 
+    (Flexão/Avanço = Positivo; Extensão/Recuo = Negativo) seja mantido 
+    conforme as convenções clínicas.
     """
     if p_prox is None or p_dist is None: 
         return np.nan
     
     if tipo == 'vertical':
-        # 0° é a vertical (apontando para baixo). 
-        # Valores positivos indicam que o segmento está projetado para a frente (flexão).
-        # Valores negativos indicam extensão.
         dx = p_dist[0] - p_prox[0]
         dz = p_prox[2] - p_dist[2] 
-        return np.degrees(np.arctan2(dx, dz))
+        ang = np.degrees(np.arctan2(dx, dz))
     else:
-        # 0° é a horizontal.
-        # Valores positivos indicam inclinação do segmento para cima (Dorsiflexão).
-        # Valores negativos indicam inclinação para baixo (Flexão Plantar).
+        # horizontal (ex: segmento do pé)
         dx = p_dist[0] - p_prox[0]
         dz = p_dist[2] - p_prox[2]
-        return np.degrees(np.arctan2(dz, dx))
+        ang = np.degrees(np.arctan2(dz, dx))
+        
+    return -ang
 
 class ProcessadorCinematico:
     def __init__(self, caminho_arquivo, nome_original, grupo="Geral", df_antropo=None):
@@ -66,7 +64,7 @@ class ProcessadorCinematico:
 
             self.dados = self._filtrar_e_inverter()
             
-            # --- MOTORES CINEMÁTICOS ---
+            # Motores Cinemáticos
             self.segmentos_df = self._calcular_angulos_segmentares() 
             self.angulos_df = self._calcular_angulos() 
             
@@ -77,7 +75,7 @@ class ProcessadorCinematico:
             self.comprimento_passo = self._calcular_comprimento_passo()
             self.tempo_ciclo_s = self._calcular_tempo_medio_ciclo()
 
-            # --- NORMALIZAÇÃO ANTROPOMÉTRICA ---
+            # Normalização Antropométrica
             self.passo_norm = {'D': np.nan, 'E': np.nan}
             if df_antropo is not None:
                 match = df_antropo[df_antropo['ID'] == self.id_paciente]
@@ -94,20 +92,6 @@ class ProcessadorCinematico:
                             self.passo_norm['E'] = ((val_e / 1000.0) / altura_m) * 100.0
             
             self.coord_vetorial = self._calcular_coordenacao_vetorial()
-
-            # --- MOTOR DE ASSIMETRIA ---
-            self.indices_assimetria = {}
-            pares = [
-                ('Passo', self.passo_norm['D'], self.passo_norm['E']),
-                ('Apoio', self.fases_marcha['D']['Apoio'], self.fases_marcha['E']['Apoio']),
-                ('Clearance', self.foot_clearance['D'], self.foot_clearance['E'])
-            ]
-            for nome, d, e in pares:
-                if not np.isnan(d) and not np.isnan(e) and (d + e) > 0:
-                    self.indices_assimetria[nome] = (abs(d - e) / (0.5 * (d + e))) * 100.0
-                else:
-                    self.indices_assimetria[nome] = np.nan
-
             self.valido = True
         except Exception as e:
             self.erro_msg = str(e)
@@ -135,10 +119,10 @@ class ProcessadorCinematico:
         out = np.zeros_like(d) * np.nan
         for m in range(d.shape[1]):
             for ax in range(3):
-                sinal = d[ax, m, :]
-                if np.isnan(sinal).all(): 
+                sinal_d = d[ax, m, :]
+                if np.isnan(sinal_d).all(): 
                     continue
-                s_temp = pd.Series(sinal).interpolate(limit_direction='both').bfill().ffill()
+                s_temp = pd.Series(sinal_d).interpolate(limit_direction='both').bfill().ffill()
                 try:
                     filt = signal.filtfilt(b, a, s_temp.to_numpy())
                     out[ax, m, :] = filt
@@ -170,7 +154,7 @@ class ProcessadorCinematico:
                 perna = self.segmentos_df[f'Perna_{lado}'][f]
                 pe = self.segmentos_df[f'Pe_{lado}'][f]
                 
-                # Respeitando a lógica Flexão (+) / Extensão (-)
+                # Cálculo Articular Revisado (Flexão/Dorsiflexão = Positivo)
                 res[f'Quad_{lado}'].append(coxa) 
                 res[f'Joel_{lado}'].append(coxa - perna if not (np.isnan(coxa) or np.isnan(perna)) else np.nan)
                 res[f'Torn_{lado}'].append(pe - perna if not (np.isnan(pe) or np.isnan(perna)) else np.nan)
@@ -524,6 +508,7 @@ if st.button("Processar e Agrupar Arquivos", type="primary", use_container_width
         st.success(f"✅ {len(st.session_state.processadores)} arquivos processados e agrupados com sucesso!")
 
 if st.session_state.processadores:
+    # Abas reduzidas de 7 para 5 conforme solicitado (exclusão das tab 6 e 7 de testes/relatórios)
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Tabela de Médias", "📈 Gráficos de Curvas", "⚙️ Coordenação (Angle-Angle)", 
         "🎥 Animações 3D (GIFs)", "📦 Estatística Espaço-Temporal"
@@ -639,80 +624,17 @@ if st.session_state.processadores:
                         cics = p.extrair_ciclos_normalizados(p.segmentos_df[f"{s}_{lado}"].values, hss)
                         dados_curvas[grp]['Seg'][f"{s}_{lado}"].extend(cics)
 
+        # Organização em Sub-Abas para contemplar os gráficos unilaterais e as médias bilaterais (comparativas)
         sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
-            "🦴 Articulares (Dir/Esq)", "🦵 Segmentares (Dir/Esq)", 
-            "⚖️ Comparação Articular (Bilateral)", "⚖️ Comparação Segmentar (Bilateral)"
+            "🦴 Articulares (Média Bilateral)", "🦵 Segmentares (Média Bilateral)", 
+            "🦴 Articulares (Curvas Dir/Esq)", "🦵 Segmentares (Curvas Dir/Esq)"
         ])
 
-        # --- SUB-ABA 1: Articulares por Lado ---
+        # --- SUB-ABA 1: Comparação Articular (Bilateral) ---
         with sub_t1:
-            cols_art = st.columns(len(grupos_estudo))
-            for idx, grp in enumerate(grupos_estudo):
-                with cols_art[idx]:
-                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
-                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
-                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
-                    x_axis = np.linspace(0, t_medio, 101)
-                    
-                    mapeamento = [('Quad_D', 0, 0, 'Quadril (DIR)'), ('Quad_E', 0, 1, 'Quadril (ESQ)'), 
-                                  ('Joel_D', 1, 0, 'Joelho (DIR)'), ('Joel_E', 1, 1, 'Joelho (ESQ)'), 
-                                  ('Torn_D', 2, 0, 'Tornozelo (DIR)'), ('Torn_E', 2, 1, 'Tornozelo (ESQ)')]
-                    
-                    for chave, row, col, titulo in mapeamento:
-                        ax = axs[row, col]
-                        ciclos = np.array(dados_curvas[grp]['Art'][chave])
-                        ax.grid(True, linestyle='--', alpha=0.5)
-                        ax.set_title(titulo, fontweight='bold', fontsize=10)
-                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
-                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
-
-                        if len(ciclos) > 0:
-                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
-                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
-                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
-                            ax.axhline(0, color='black', lw=0.8)
-                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig); plt.close(fig)
-
-        # --- SUB-ABA 2: Segmentares por Lado ---
-        with sub_t2:
-            cols_seg = st.columns(len(grupos_estudo))
-            for idx, grp in enumerate(grupos_estudo):
-                with cols_seg[idx]:
-                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
-                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
-                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
-                    x_axis = np.linspace(0, t_medio, 101)
-                    
-                    mapeamento = [('Coxa_D', 0, 0, 'Coxa (DIR)'), ('Coxa_E', 0, 1, 'Coxa (ESQ)'), 
-                                  ('Perna_D', 1, 0, 'Perna (DIR)'), ('Perna_E', 1, 1, 'Perna (ESQ)'), 
-                                  ('Pe_D', 2, 0, 'Pé (DIR)'), ('Pe_E', 2, 1, 'Pé (ESQ)')]
-                    
-                    for chave, row, col, titulo in mapeamento:
-                        ax = axs[row, col]
-                        ciclos = np.array(dados_curvas[grp]['Seg'][chave])
-                        ax.grid(True, linestyle='--', alpha=0.5)
-                        ax.set_title(titulo, fontweight='bold', fontsize=10)
-                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
-                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
-
-                        if len(ciclos) > 0:
-                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
-                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
-                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
-                            ax.axhline(0, color='black', lw=0.8)
-                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig); plt.close(fig)
-
-        # --- SUB-ABA 3: Comparação Articular (Bilateral) ---
-        with sub_t3:
             st.markdown("<h5 style='text-align:center;'>Média Bilateral Articular (Direito + Esquerdo)</h5>", unsafe_allow_html=True)
             fig_comp_art, axs_comp_art = plt.subplots(1, 3, figsize=(15, 5))
-            cores_comp = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd'] # Até 4 grupos
+            cores_comp = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd']
             articulacoes = ['Quad', 'Joel', 'Torn']
             titulos = ['Quadril', 'Joelho', 'Tornozelo']
 
@@ -742,8 +664,8 @@ if st.session_state.processadores:
             plt.tight_layout()
             st.pyplot(fig_comp_art); plt.close(fig_comp_art)
 
-        # --- SUB-ABA 4: Comparação Segmentar (Bilateral) ---
-        with sub_t4:
+        # --- SUB-ABA 2: Comparação Segmentar (Bilateral) ---
+        with sub_t2:
             st.markdown("<h5 style='text-align:center;'>Média Bilateral Segmentar (Direito + Esquerdo)</h5>", unsafe_allow_html=True)
             fig_comp_seg, axs_comp_seg = plt.subplots(1, 3, figsize=(15, 5))
             segmentos = ['Coxa', 'Perna', 'Pe']
@@ -774,6 +696,70 @@ if st.session_state.processadores:
             
             plt.tight_layout()
             st.pyplot(fig_comp_seg); plt.close(fig_comp_seg)
+
+        # --- SUB-ABA 3: Articulares Individuais (Lado a Lado) ---
+        with sub_t3:
+            cols_art = st.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_art[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
+                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    mapeamento = [('Quad_D', 0, 0, 'Quadril (DIR)'), ('Quad_E', 0, 1, 'Quadril (ESQ)'), 
+                                  ('Joel_D', 1, 0, 'Joelho (DIR)'), ('Joel_E', 1, 1, 'Joelho (ESQ)'), 
+                                  ('Torn_D', 2, 0, 'Tornozelo (DIR)'), ('Torn_E', 2, 1, 'Tornozelo (ESQ)')]
+                    
+                    for chave, row, col, titulo in mapeamento:
+                        ax = axs[row, col]
+                        ciclos = np.array(dados_curvas[grp]['Art'][chave])
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                        ax.set_title(titulo, fontweight='bold', fontsize=10)
+                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
+
+                        if len(ciclos) > 0:
+                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
+                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
+                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
+                            ax.axhline(0, color='black', lw=0.8)
+                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close(fig)
+
+        # --- SUB-ABA 4: Segmentares Individuais (Lado a Lado) ---
+        with sub_t4:
+            cols_seg = st.columns(len(grupos_estudo))
+            for idx, grp in enumerate(grupos_estudo):
+                with cols_seg[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
+                    fig, axs = plt.subplots(3, 2, figsize=(7, 9), sharex=True)
+                    t_medio = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
+                    x_axis = np.linspace(0, t_medio, 101)
+                    
+                    mapeamento = [('Coxa_D', 0, 0, 'Coxa (DIR)'), ('Coxa_E', 0, 1, 'Coxa (ESQ)'), 
+                                  ('Perna_D', 1, 0, 'Perna (DIR)'), ('Perna_E', 1, 1, 'Perna (ESQ)'), 
+                                  ('Pe_D', 2, 0, 'Pé (DIR)'), ('Pe_E', 2, 1, 'Pé (ESQ)')]
+                    
+                    for chave, row, col, titulo in mapeamento:
+                        ax = axs[row, col]
+                        ciclos = np.array(dados_curvas[grp]['Seg'][chave])
+                        ax.grid(True, linestyle='--', alpha=0.5)
+                        ax.set_title(titulo, fontweight='bold', fontsize=10)
+                        if col == 0: ax.set_ylabel("Graus (°)", fontsize=9)
+                        if row == 2: ax.set_xlabel("Tempo (s)", fontsize=9)
+
+                        if len(ciclos) > 0:
+                            media, std = np.mean(ciclos, axis=0), np.std(ciclos, axis=0)
+                            ax.fill_between(x_axis, media - std, media + std, color='gray', alpha=0.3)
+                            ax.plot(x_axis, media, color='blue' if col==1 else 'red', lw=2)
+                            ax.axhline(0, color='black', lw=0.8)
+                        else: ax.text(t_medio/2, 0, "Sem Dados", ha='center')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close(fig)
 
     with tab3:
         st.subheader("⚙️ Coordenação Vetorial e Controle Motor")
