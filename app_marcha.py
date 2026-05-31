@@ -118,15 +118,10 @@ class ProcessadorCinematico:
         for f in range(self.n_frames):
             for lado, l in [('D', 'R'), ('E', 'L')]:
                 h = self._get(f'{l}IAS',f); k = self._mid(f'{l}LE', f'{l}ME',f); a = self._mid(f'{l}ML', f'{l}MM',f)
-                
-                # Correção: Uso exclusivo do FT1 para isolar a projeção sagital contra inversão/eversão
                 p = self._get(f'{l}FT1', f); cal = self._get(f'{l}CAL',f)
                 
                 res[f'Coxa_{lado}'].append(self._ang_sagital_vert(h, k))
                 res[f'Perna_{lado}'].append(self._ang_sagital_vert(k, a))
-                
-                # Correção: Eixo vertical parametrizado ao segmento distal unificado para todos os segmentos, 
-                # com shift de -90° para alinhar a rotação angular do pé com a figura 1C do paper.
                 res[f'Pe_{lado}'].append(self._ang_sagital_vert(cal, p) - 90)
         return pd.DataFrame(res)
 
@@ -239,30 +234,45 @@ class ProcessadorCinematico:
             ]
             
             for nome_par, col_prox, col_dist, df_ref in pares:
-                c_prox = self.extrair_ciclos_normalizados(df_ref[col_prox].values, hss)
-                c_dist = self.extrair_ciclos_normalizados(df_ref[col_dist].values, hss)
-                if not c_prox or not c_dist: continue
+                # Cálculo ORIGINAL sobre os dados contínuos para evitar distorção da derivada
+                raw_prox = df_ref[col_prox].values
+                raw_dist = df_ref[col_dist].values
+                
+                ca_cont = np.mod(np.degrees(np.arctan2(np.diff(raw_dist), np.diff(raw_prox))), 360)
+                ca_cont = np.append(ca_cont, ca_cont[-1])
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
                 
                 cas = []
                 
-                for cp, cd in zip(c_prox, c_dist):
-                    angulos = np.mod(np.degrees(np.arctan2(np.diff(cd), np.diff(cp))), 360)
-                    cas.append(angulos)
+                for i in range(len(hss) - 1):
+                    if hss[i+1] > len(ca_cont): continue
+                    ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+                    
+                    # Interpolação circular para manter a normalização
+                    rad = np.radians(ciclo_ca)
+                    sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
+                    cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
+                    ca_norm = np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360)
+                    
+                    cas.append(ca_norm)
                     counts = {'Proximal': 0, 'Distal': 0, 'EmFase': 0, 'AntiFase': 0}
-                    for a in angulos:
+                    
+                    for a in ca_norm:
                         if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): counts['Proximal'] += 1
                         elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): counts['EmFase'] += 1
                         elif (67.5 <= a < 112.5) or (247.5 <= a < 292.5): counts['Distal'] += 1
                         else: counts['AntiFase'] += 1
-                    for k in counts: freqs[k].append((counts[k] / len(angulos)) * 100)
+                    for k in counts: freqs[k].append((counts[k] / len(ca_norm)) * 100)
+                
+                if not cas: continue
+                
                 for k in freqs: res[nome_par][k] = np.mean(freqs[k])
                 
-                rad = np.radians(np.array(cas))
-                s_m = np.nanmean(np.sin(rad), axis=0)
-                c_m = np.nanmean(np.cos(rad), axis=0)
+                rad_cas = np.radians(np.array(cas))
+                s_m = np.nanmean(np.sin(rad_cas), axis=0)
+                c_m = np.nanmean(np.cos(rad_cas), axis=0)
                 ang_m = np.mod(np.degrees(np.arctan2(s_m, c_m)), 360)
                 
                 fatia_media = []
@@ -471,12 +481,22 @@ if st.session_state.processadores:
         if 'parkinson' in g: return 'black', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
 
-    def calcular_ca_serie(prox_cics, dist_cics):
+    # Nova função que calcula a diferença matemática nas matrizes contínuas 
+    def calcular_ca_serie(prox_raw, dist_raw, hss):
+        ca_cont = np.mod(np.degrees(np.arctan2(np.diff(dist_raw), np.diff(prox_raw))), 360)
+        ca_cont = np.append(ca_cont, ca_cont[-1])
         cas = []
-        for cp, cd in zip(prox_cics, dist_cics):
-            ca = np.mod(np.degrees(np.arctan2(np.diff(cd), np.diff(cp))), 360)
-            ca = np.append(ca, ca[-1]) 
-            cas.append(ca)
+        if len(hss) < 2: return []
+        for i in range(len(hss) - 1):
+            if hss[i+1] > len(ca_cont): continue
+            ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+            
+            # Normalização circular 0-100%
+            rad = np.radians(ciclo_ca)
+            sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
+            cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
+            ca_norm = np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360)
+            cas.append(ca_norm)
         return cas
 
     def media_circular(ciclos):
@@ -522,13 +542,13 @@ if st.session_state.processadores:
                 dados_curvas[grp]['Seg'][f"Perna_{lado}"].extend(cics_perna)
                 dados_curvas[grp]['Seg'][f"Pe_{lado}"].extend(cics_pe)
                 
-                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(cics_quad, cics_joel))
-                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(cics_joel, cics_torn))
-                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(cics_coxa, cics_perna))
-                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(cics_perna, cics_pe))
+                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Quad_{lado}"].values, p.angulos_df[f"Joel_{lado}"].values, hss))
+                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Joel_{lado}"].values, p.angulos_df[f"Torn_{lado}"].values, hss))
+                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, hss))
+                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, hss))
 
-    tab1, tab2, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
-        "📊 Tabela", "📈 Cinemática", "🔄 Angle-Angle", "📈 Coupling Angle", 
+    tab1, tab2, tab_paper, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
+        "📊 Tabela", "📈 Cinemática", "📄 Plot Paper (A-G)", "🔄 Angle-Angle", "📈 Coupling Angle", 
         "📊 Freq. Coordenação", "🎥 Animações 3D", "📦 Estatística"
     ])
 
@@ -689,6 +709,72 @@ if st.session_state.processadores:
                         ciclos = dados_curvas[grp][tipo][chave]
                         if ciclos: ax.plot(x_axis_perc, np.mean(ciclos, axis=0), color=cor, linestyle=ls, lw=lw); ax.axhline(0, color='black', lw=0.8)
                     plt.tight_layout(); st.pyplot(fig_ind); plt.close(fig_ind)
+
+    with tab_paper:
+        st.subheader("📄 Relatório Paper: Padronização Direta da Função (A-G)")
+        st.info("Layout recriado mantendo os cálculos com a fórmula contínua exigida pela literatura Vector Coding. Dados de plotagem extraídos em tempo real e não interpolados previamente.")
+        if len(st.session_state.processadores) > 0:
+            p_nomes = [p.nome_arq for p in st.session_state.processadores]
+            p_selecionado = st.selectbox("Selecione o Arquivo a Analisar:", p_nomes)
+            proc = next(p for p in st.session_state.processadores if p.nome_arq == p_selecionado)
+            lado_p = st.radio("Selecione o Lado Dominante para o Gráfico:", ["Direito (D)", "Esquerdo (E)"])
+            l = 'D' if 'Direito' in lado_p else 'E'
+
+            if len(proc.eventos[l]['HS']) >= 2:
+                # Utilizamos as batidas do calcanhar (HS) para delimitar 1 ciclo real
+                start = proc.eventos[l]['HS'][0]
+                end = proc.eventos[l]['HS'][1]
+                t_arr = np.arange(end - start) / proc.freq
+                
+                # Dados ADVINDOS DIRETAMENTE DA FUNÇÃO SEGMENTAR sem normalização prévia
+                coxa = proc.segmentos_df[f'Coxa_{l}'].values[start:end]
+                perna = proc.segmentos_df[f'Perna_{l}'].values[start:end]
+                pe = proc.segmentos_df[f'Pe_{l}'].values[start:end]
+
+                # FÓRMULA ORIGINAL do Coupling Angle
+                # Thigh-Shank: Shank (Y) and Thigh (X)
+                ca_cp = np.mod(np.degrees(np.arctan2(np.diff(perna), np.diff(coxa))), 360)
+                ca_cp = np.append(ca_cp, ca_cp[-1])
+                # Shank-Foot: Foot (Y) and Shank (X)
+                ca_pp = np.mod(np.degrees(np.arctan2(np.diff(pe), np.diff(perna))), 360)
+                ca_pp = np.append(ca_pp, ca_pp[-1])
+
+                fig_paper = plt.figure(figsize=(12, 12))
+                
+                # A, B, C (Row 1)
+                axA = plt.subplot2grid((3, 6), (0, 0), colspan=2)
+                axB = plt.subplot2grid((3, 6), (0, 2), colspan=2)
+                axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
+                
+                axA.plot(t_arr, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('Time (s)'); axA.set_ylabel('Thigh angular rotation (°)')
+                axB.plot(t_arr, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('Time (s)'); axB.set_ylabel('Shank angular rotation (°)')
+                axC.plot(t_arr, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('Time (s)'); axC.set_ylabel('Foot angular rotation (°)')
+
+                # D, E (Row 2 - Angle-Angle com os dados diretos da função original)
+                axD = plt.subplot2grid((3, 6), (1, 0), colspan=3)
+                axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
+                
+                axD.plot(coxa, perna, 'k-', lw=1.2); axD.set_title('D', loc='left', fontweight='bold'); axD.set_xlabel('Thigh (°)'); axD.set_ylabel('Shank (°)')
+                axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
+                
+                axE.plot(perna, pe, 'k-', lw=1.2); axE.set_title('E', loc='left', fontweight='bold'); axE.set_xlabel('Shank (°)'); axE.set_ylabel('Foot (°)')
+                axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
+
+                # F, G (Row 3 - Séries Temporais do Coupling Angle)
+                axF = plt.subplot2grid((3, 6), (2, 0), colspan=3)
+                axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
+
+                axF.plot(t_arr, ca_cp, 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('Time (s)'); axF.set_ylabel('Thigh-shank coupling angle (°)')
+                axF.set_ylim(0, 360)
+                
+                axG.plot(t_arr, ca_pp, 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('Time (s)'); axG.set_ylabel('Shank-foot coupling angle (°)')
+                axG.set_ylim(0, 360)
+
+                plt.tight_layout()
+                st.pyplot(fig_paper)
+                plt.close(fig_paper)
+            else:
+                st.warning("Sem dados suficientes (contato inicial) para isolar um ciclo neste lado.")
 
     with tab_aa:
         st.subheader("🔄 Diagramas Angle-Angle (Ciclogramas Espaciais)")
@@ -883,7 +969,6 @@ if st.session_state.processadores:
     with tab_freq:
         st.subheader("📊 Frequência de Coordenação Vetorial (Vector Coding)")
         
-        # Padrões de Plotagem Pretos e Brancos (Publicação)
         bw_padroes = {
             'Proximal': {'cor': '#ffffff', 'hatch': '////'},
             'EmFase':   {'cor': '#cccccc', 'hatch': '\\\\\\\\'},
