@@ -150,7 +150,7 @@ class ProcessadorCinematico:
         rias_data, lias_data = self._get('RIAS', slice(None)), self._get('LIAS', slice(None))
         if rias_data is None or lias_data is None: return eventos 
         pelvis_x = (rias_data[0] + lias_data[0]) / 2
-        dist_frames = int(self.freq * 0.6)
+        dist_frames = int(self.freq * 0.35)
         
         for lado, cal_label, toe_label in [('D','RCAL','RFT1'), ('E','LCAL','LFT1')]:
             cal_x_data, toe_x_data = self._get(cal_label, slice(None)), self._get(toe_label, slice(None))
@@ -221,19 +221,50 @@ class ProcessadorCinematico:
         if passos_e: res['E'] = np.mean(passos_e)
         return res
 
-    def extrair_ciclos_normalizados(self, vetor_dados, eventos_hs, pontos=101):
+    def extrair_ciclos_normalizados(self, vetor_dados, eventos_hs, eventos_to=None, pontos=101):
+        """ Normalização temporal particionada 60-40 (Apoio-Balanço) baseada nos eventos Zeni """
         ciclos = []
         if len(eventos_hs) < 2: return []
+        
+        idx_to_norm = int(round((pontos - 1) * 0.60)) # 60
+        pts_apoio = idx_to_norm + 1 # 61 (0-60%)
+        pts_balanco = pontos - idx_to_norm # 41 (60-100%)
+        
         for i in range(len(eventos_hs) - 1):
-            if eventos_hs[i+1] > len(vetor_dados): continue
-            ciclo_bruto = vetor_dados[eventos_hs[i]:eventos_hs[i+1]]
-            ciclos.append(np.interp(np.linspace(0, len(ciclo_bruto)-1, pontos), np.arange(len(ciclo_bruto)), ciclo_bruto))
+            hs_atual = eventos_hs[i]
+            hs_prox = eventos_hs[i+1]
+            if hs_prox >= len(vetor_dados): continue
+            
+            to_valido = None
+            if eventos_to is not None:
+                tos_no_ciclo = [t for t in eventos_to if hs_atual < t < hs_prox]
+                if tos_no_ciclo:
+                    to_valido = tos_no_ciclo[0]
+            
+            if to_valido is not None and hs_atual < to_valido < hs_prox:
+                # Interpolação da Fase de Apoio
+                fase_apoio = vetor_dados[hs_atual:to_valido+1] 
+                fase_apoio_norm = np.interp(np.linspace(0, len(fase_apoio)-1, pts_apoio), np.arange(len(fase_apoio)), fase_apoio)
+                
+                # Interpolação da Fase de Balanço
+                fase_balanco = vetor_dados[to_valido:hs_prox+1]
+                fase_balanco_norm = np.interp(np.linspace(0, len(fase_balanco)-1, pts_balanco), np.arange(len(fase_balanco)), fase_balanco)
+                
+                # Aglutina (removendo o primeiro frame redundante do balanço que é o próprio TO)
+                ciclo_norm = np.concatenate((fase_apoio_norm, fase_balanco_norm[1:]))
+                ciclos.append(ciclo_norm)
+            else:
+                # Fallback: interpolação linear padrão se o TO estiver ausente/corrompido
+                ciclo_bruto = vetor_dados[hs_atual:hs_prox+1]
+                if len(ciclo_bruto) < 2: continue
+                ciclos.append(np.interp(np.linspace(0, len(ciclo_bruto)-1, pontos), np.arange(len(ciclo_bruto)), ciclo_bruto))
         return ciclos
 
     def _calcular_coordenacao_vetorial(self):
         res = {}; self.coord_vetorial_series = {} 
         for lado in ['D', 'E']:
             hss = self.eventos[lado]['HS']
+            tos = self.eventos[lado]['TO']
             if len(hss) < 2: continue
             
             pares = [
@@ -250,7 +281,7 @@ class ProcessadorCinematico:
                 if len(raw_prox) < 2 or len(raw_dist) < 2:
                     continue
                 
-                # Inversão do vetor (-np.diff) para replicar a plotagem do artigo
+                # Inversão vetorial (-np.diff) do artigo
                 ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(raw_dist), -np.diff(raw_prox))), 360)
                 
                 if len(ca_cont) > 0:
@@ -260,23 +291,42 @@ class ProcessadorCinematico:
                 
                 res[nome_par] = {'Proximal': np.nan, 'Distal': np.nan, 'EmFase': np.nan, 'AntiFase': np.nan}
                 freqs = {'Proximal': [], 'Distal': [], 'EmFase': [], 'AntiFase': []}
-                
                 cas = []
                 
                 for i in range(len(hss) - 1):
-                    if hss[i+1] > len(ca_cont): continue
-                    ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+                    hs_atual = hss[i]
+                    hs_prox = hss[i+1]
+                    if hs_prox >= len(ca_cont): continue
                     
-                    if len(ciclo_ca) == 0: continue
+                    to_valido = None
+                    tos_no_ciclo = [t for t in tos if hs_atual < t < hs_prox]
+                    if tos_no_ciclo: to_valido = tos_no_ciclo[0]
                     
-                    rad = np.radians(ciclo_ca)
-                    sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
-                    cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
+                    # Aplicação da Normalização Bipartida em Domínio Circular
+                    if to_valido is not None and hs_atual < to_valido < hs_prox:
+                        fase_ap = ca_cont[hs_atual:to_valido+1]
+                        rad_ap = np.radians(fase_ap)
+                        sin_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.sin(rad_ap))
+                        cos_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.cos(rad_ap))
+                        
+                        fase_bal = ca_cont[to_valido:hs_prox+1]
+                        rad_bal = np.radians(fase_bal)
+                        sin_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.sin(rad_bal))
+                        cos_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.cos(rad_bal))
+                        
+                        sin_norm = np.concatenate((sin_ap, sin_bal[1:]))
+                        cos_norm = np.concatenate((cos_ap, cos_bal[1:]))
+                    else:
+                        ciclo_ca = ca_cont[hs_atual:hs_prox+1]
+                        if len(ciclo_ca) < 2: continue
+                        rad = np.radians(ciclo_ca)
+                        sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
+                        cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
+                        
                     ca_norm = np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360)
-                    
                     cas.append(ca_norm)
-                    counts = {'Proximal': 0, 'Distal': 0, 'EmFase': 0, 'AntiFase': 0}
                     
+                    counts = {'Proximal': 0, 'Distal': 0, 'EmFase': 0, 'AntiFase': 0}
                     for a in ca_norm:
                         if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): counts['Proximal'] += 1
                         elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): counts['EmFase'] += 1
@@ -499,32 +549,44 @@ if st.session_state.processadores:
         if 'parkinson' in g: return 'grey', '--', 1.2
         return cores_comp[idx % len(cores_comp)], '--', 1.2
 
-    # Nova função que calcula a diferença matemática nas matrizes contínuas (Paper Style CA)
-    def calcular_ca_serie(prox_raw, dist_raw, hss):
-        if len(prox_raw) < 2 or len(dist_raw) < 2:
-            return []
+    # Normalização em Espaço Circular Bipartida (Apoio-Balanço)
+    def calcular_ca_serie(prox_raw, dist_raw, hss, tos=None):
+        if len(prox_raw) < 2 or len(dist_raw) < 2: return []
             
         ca_cont = np.mod(np.degrees(np.arctan2(-np.diff(dist_raw), -np.diff(prox_raw))), 360)
-        
-        if len(ca_cont) > 0:
-            ca_cont = np.append(ca_cont, ca_cont[-1])
-        else:
-            return []
+        if len(ca_cont) > 0: ca_cont = np.append(ca_cont, ca_cont[-1])
+        else: return []
         
         cas = []
         if len(hss) < 2: return []
+        
         for i in range(len(hss) - 1):
-            if hss[i+1] > len(ca_cont): continue
-            ciclo_ca = ca_cont[hss[i]:hss[i+1]]
+            hs_atual = hss[i]; hs_prox = hss[i+1]
+            if hs_prox >= len(ca_cont): continue
             
-            if len(ciclo_ca) == 0: continue
+            to_valido = None
+            if tos is not None:
+                tos_no_ciclo = [t for t in tos if hs_atual < t < hs_prox]
+                if tos_no_ciclo: to_valido = tos_no_ciclo[0]
             
-            # Normalização circular 0-100%
-            rad = np.radians(ciclo_ca)
-            sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
-            cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
-            ca_norm = np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360)
-            cas.append(ca_norm)
+            if to_valido is not None and hs_atual < to_valido < hs_prox:
+                fase_ap = ca_cont[hs_atual:to_valido+1]; rad_ap = np.radians(fase_ap)
+                sin_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.sin(rad_ap))
+                cos_ap = np.interp(np.linspace(0, len(fase_ap)-1, 61), np.arange(len(fase_ap)), np.cos(rad_ap))
+                
+                fase_bal = ca_cont[to_valido:hs_prox+1]; rad_bal = np.radians(fase_bal)
+                sin_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.sin(rad_bal))
+                cos_bal = np.interp(np.linspace(0, len(fase_bal)-1, 41), np.arange(len(fase_bal)), np.cos(rad_bal))
+                
+                sin_norm = np.concatenate((sin_ap, sin_bal[1:])); cos_norm = np.concatenate((cos_ap, cos_bal[1:]))
+            else:
+                ciclo_ca = ca_cont[hs_atual:hs_prox+1]
+                if len(ciclo_ca) < 2: continue
+                rad = np.radians(ciclo_ca)
+                sin_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.sin(rad))
+                cos_norm = np.interp(np.linspace(0, len(ciclo_ca)-1, 101), np.arange(len(ciclo_ca)), np.cos(rad))
+                
+            cas.append(np.mod(np.degrees(np.arctan2(sin_norm, cos_norm)), 360))
         return cas
 
     def media_circular(ciclos):
@@ -553,27 +615,28 @@ if st.session_state.processadores:
                 
             for lado in ['D', 'E']:
                 hss = p.eventos[lado]['HS']
+                tos = p.eventos[lado]['TO']
                 
-                cics_quad = p.extrair_ciclos_normalizados(p.angulos_df[f"Quad_{lado}"].values, hss)
-                cics_joel = p.extrair_ciclos_normalizados(p.angulos_df[f"Joel_{lado}"].values, hss)
-                cics_torn = p.extrair_ciclos_normalizados(p.angulos_df[f"Torn_{lado}"].values, hss)
-                
-                cics_coxa = p.extrair_ciclos_normalizados(p.segmentos_df[f"Coxa_{lado}"].values, hss)
-                cics_perna = p.extrair_ciclos_normalizados(p.segmentos_df[f"Perna_{lado}"].values, hss)
-                cics_pe = p.extrair_ciclos_normalizados(p.segmentos_df[f"Pe_{lado}"].values, hss)
+                # Normalização das Curvas Cinemáticas Espaciais Fixadas em 60%
+                cics_quad = p.extrair_ciclos_normalizados(p.angulos_df[f"Quad_{lado}"].values, hss, tos)
+                cics_joel = p.extrair_ciclos_normalizados(p.angulos_df[f"Joel_{lado}"].values, hss, tos)
+                cics_torn = p.extrair_ciclos_normalizados(p.angulos_df[f"Torn_{lado}"].values, hss, tos)
+                cics_coxa = p.extrair_ciclos_normalizados(p.segmentos_df[f"Coxa_{lado}"].values, hss, tos)
+                cics_perna = p.extrair_ciclos_normalizados(p.segmentos_df[f"Perna_{lado}"].values, hss, tos)
+                cics_pe = p.extrair_ciclos_normalizados(p.segmentos_df[f"Pe_{lado}"].values, hss, tos)
                 
                 dados_curvas[grp]['Art'][f"Quad_{lado}"].extend(cics_quad)
                 dados_curvas[grp]['Art'][f"Joel_{lado}"].extend(cics_joel)
                 dados_curvas[grp]['Art'][f"Torn_{lado}"].extend(cics_torn)
-                
                 dados_curvas[grp]['Seg'][f"Coxa_{lado}"].extend(cics_coxa)
                 dados_curvas[grp]['Seg'][f"Perna_{lado}"].extend(cics_perna)
                 dados_curvas[grp]['Seg'][f"Pe_{lado}"].extend(cics_pe)
                 
-                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Quad_{lado}"].values, p.angulos_df[f"Joel_{lado}"].values, hss))
-                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Joel_{lado}"].values, p.angulos_df[f"Torn_{lado}"].values, hss))
-                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, hss))
-                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, hss))
+                # Normalização Vetorial em Espaço Circular Fixado em 60%
+                dados_curvas[grp]['CA_Art'][f"Quad_Joel_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Quad_{lado}"].values, p.angulos_df[f"Joel_{lado}"].values, hss, tos))
+                dados_curvas[grp]['CA_Art'][f"Joel_Torn_{lado}"].extend(calcular_ca_serie(p.angulos_df[f"Joel_{lado}"].values, p.angulos_df[f"Torn_{lado}"].values, hss, tos))
+                dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, hss, tos))
+                dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, hss, tos))
 
     tab1, tab2, tab_paper, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
         "📊 Tabela", "📈 Cinemática", "📄 Plot Paper (A-G)", "🔄 Angle-Angle", "📈 Coupling Angle", 
@@ -611,11 +674,12 @@ if st.session_state.processadores:
                     try:
                         prox_name, dist_name, lado = par_key.split('_')[0], par_key.split('_')[1], par_key.split('_')[2]
                         hss = p.eventos[lado]['HS']
+                        tos = p.eventos[lado]['TO']
                         df_obj = getattr(p, nome_df)
                         
                         if len(hss) > 1:
-                            c_prox = p.extrair_ciclos_normalizados(df_obj[f"{prox_name}_{lado}"].values, hss)
-                            c_dist = p.extrair_ciclos_normalizados(df_obj[f"{dist_name}_{lado}"].values, hss)
+                            c_prox = p.extrair_ciclos_normalizados(df_obj[f"{prox_name}_{lado}"].values, hss, tos)
+                            c_dist = p.extrair_ciclos_normalizados(df_obj[f"{dist_name}_{lado}"].values, hss, tos)
                             if len(c_prox) > 0 and len(c_dist) > 0:
                                 arr_p, arr_d = np.array(c_prox), np.array(c_dist)
                                 delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
@@ -839,7 +903,7 @@ if st.session_state.processadores:
 
     with tab_aa:
         st.subheader("🔄 Diagramas Angle-Angle (Ciclogramas Espaciais)")
-        st.markdown("Padrão visual adaptado para artigos científicos. Eixos correspondentes às normas da literatura.")
+        st.markdown("Padrão visual adaptado para artigos científicos. A marca preta indica o Contato Inicial (0%) e o cruzamento das linhas orienta o centro (0°).")
         
         sub_aa1, sub_aa2, sub_aa3, sub_aa4 = st.tabs([
             "🟢 Padrão Normativo (Controle)", 
@@ -868,7 +932,7 @@ if st.session_state.processadores:
                     if x_cics and y_cics:
                         x_mean, y_mean = np.mean(np.array(x_cics), axis=0), np.mean(np.array(y_cics), axis=0)
                         ax.plot(x_mean, y_mean, color='black', lw=1.5)
-                        ax.scatter(x_mean[0], y_mean[0], color='black', s=40, zorder=5) # Black dot instead of green
+                        ax.scatter(x_mean[0], y_mean[0], color='black', s=40, zorder=5)
                     ax.set_xlabel(label_x, fontsize=10); ax.set_ylabel(label_y, fontsize=10)
                     ax.axhline(0, color='black', lw=0.5); ax.axvline(0, color='black', lw=0.5)
                 plt.tight_layout(); st.pyplot(fig_aa_ctrl); plt.close(fig_aa_ctrl)
@@ -942,8 +1006,7 @@ if st.session_state.processadores:
                     plt.tight_layout(); st.pyplot(fig_ind_aa); plt.close(fig_ind_aa)
 
     with tab_ca:
-        st.subheader("📈 Coupling Angle - Séries Temporais (Média Agregada)")
-        st.markdown("Estilo padronizado com o *Paper Style* (Rótulos invertidos para eixos X e Y)")
+        st.subheader("📈 Coupling Angle - Séries Temporais (Média Normalizada a 100%)")
         sub_ca1, sub_ca2, sub_ca3, sub_ca4 = st.tabs(["🟢 Normativo (Controle)", "⚖️ Comparação Articular", "⚖️ Comparação Segmentar", "🔍 Curvas Individuais"])
 
         with sub_ca1:
@@ -951,8 +1014,7 @@ if st.session_state.processadores:
             grupo_controle = [g for g in grupos_estudo if 'control' in g.lower()]
             if grupo_controle:
                 grp_ctrl = grupo_controle[0]
-                t_m = np.mean(dados_curvas[grp_ctrl]['Tempos']) if dados_curvas[grp_ctrl]['Tempos'] else 1.0
-                x_tempo = np.linspace(0, t_m, 101)
+                x_tempo = np.linspace(0, 100, 101)
                 
                 fig_ca_ctrl, axs_ca_ctrl = plt.subplots(2, 2, figsize=(10, 8))
                 pares_ca_ctrl = [(axs_ca_ctrl[0,0], 'Quad_Joel', 'CA_Art', 'Hip-knee coupling angle (°)'), 
@@ -962,7 +1024,7 @@ if st.session_state.processadores:
                 
                 for ax, par, tipo, titulo in pares_ca_ctrl:
                     ax.set_ylabel(titulo)
-                    ax.set_xlabel("Time (s)")
+                    ax.set_xlabel("% Cycle")
                     ax.set_ylim(0, 360); ax.set_yticks([0, 100, 200, 300])
                     ciclos = dados_curvas[grp_ctrl][tipo][f"{par}_D"] + dados_curvas[grp_ctrl][tipo][f"{par}_E"]
                     if ciclos: ax.plot(x_tempo, media_circular(ciclos), color='black', lw=1.5)
@@ -973,11 +1035,10 @@ if st.session_state.processadores:
             fig_ca_art, axs_ca_art = plt.subplots(1, 2, figsize=(10, 4.5))
             for idx_par, (ax, par, titulo) in enumerate([(axs_ca_art[0], 'Quad_Joel', 'Hip-knee coupling angle (°)'), (axs_ca_art[1], 'Joel_Torn', 'Knee-ankle coupling angle (°)')]):
                 ax.set_ylabel(titulo)
-                ax.set_xlabel("Time (s)")
+                ax.set_xlabel("% Cycle")
                 ax.set_ylim(0, 360); ax.set_yticks([0, 100, 200, 300])
                 for idx, grp in enumerate(grupos_estudo):
-                    t_m = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
-                    x_tempo = np.linspace(0, t_m, 101)
+                    x_tempo = np.linspace(0, 100, 101)
                     ciclos = dados_curvas[grp]['CA_Art'][f"{par}_D"] + dados_curvas[grp]['CA_Art'][f"{par}_E"]
                     if ciclos:
                         cor, ls, lw = obter_estilo(grp, idx)
@@ -990,11 +1051,10 @@ if st.session_state.processadores:
             fig_ca_seg, axs_ca_seg = plt.subplots(1, 2, figsize=(10, 4.5))
             for idx_par, (ax, par, titulo) in enumerate([(axs_ca_seg[0], 'Coxa_Perna', 'Thigh-shank coupling angle (°)'), (axs_ca_seg[1], 'Perna_Pe', 'Shank-foot coupling angle (°)')]):
                 ax.set_ylabel(titulo)
-                ax.set_xlabel("Time (s)")
+                ax.set_xlabel("% Cycle")
                 ax.set_ylim(0, 360); ax.set_yticks([0, 100, 200, 300])
                 for idx, grp in enumerate(grupos_estudo):
-                    t_m = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
-                    x_tempo = np.linspace(0, t_m, 101)
+                    x_tempo = np.linspace(0, 100, 101)
                     ciclos = dados_curvas[grp]['CA_Seg'][f"{par}_D"] + dados_curvas[grp]['CA_Seg'][f"{par}_E"]
                     if ciclos:
                         cor, ls, lw = obter_estilo(grp, idx)
@@ -1007,8 +1067,7 @@ if st.session_state.processadores:
             for idx, grp in enumerate(grupos_estudo):
                 with cols_sep_ca[idx]:
                     st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
-                    t_m = np.mean(dados_curvas[grp]['Tempos']) if dados_curvas[grp]['Tempos'] else 1.0
-                    x_tempo = np.linspace(0, t_m, 101)
+                    x_tempo = np.linspace(0, 100, 101)
                     fig_ind_ca, axs_ind_ca = plt.subplots(4, 2, figsize=(7, 12), sharex=True)
                     map_ca_ind = [('Quad_Joel_D', 0, 0, 'CA_Art'), ('Quad_Joel_E', 0, 1, 'CA_Art'), ('Joel_Torn_D', 1, 0, 'CA_Art'), ('Joel_Torn_E', 1, 1, 'CA_Art'),
                                   ('Coxa_Perna_D', 2, 0, 'CA_Seg'), ('Coxa_Perna_E', 2, 1, 'CA_Seg'), ('Perna_Pe_D', 3, 0, 'CA_Seg'), ('Perna_Pe_E', 3, 1, 'CA_Seg')]
@@ -1016,7 +1075,7 @@ if st.session_state.processadores:
                     for chave, row, col, tipo in map_ca_ind:
                         ax = axs_ind_ca[row, col]; ax.set_title(chave, fontweight='bold', fontsize=10)
                         if col == 0: ax.set_ylabel("CA (°)", fontsize=9)
-                        if row == 3: ax.set_xlabel("Time (s)", fontsize=9)
+                        if row == 3: ax.set_xlabel("% Cycle", fontsize=9)
                         ax.set_ylim(0, 360); ax.set_yticks([0, 180, 360])
                         ciclos = dados_curvas[grp][tipo][chave]
                         if ciclos: ax.plot(x_tempo, media_circular(ciclos), color=cor, linestyle=ls, lw=lw)
