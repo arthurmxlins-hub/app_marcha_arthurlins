@@ -336,49 +336,73 @@ class GeradorVisual:
 
     def montar_frame(self, f):
         s = {}
-        # REFORÇO DE C3D (Fallback): Se sumir um marcador, tenta montar com o parceiro proximal/distal
-        rias = self._get_f('RIAS', f); rips = self._get_f('RIPS', f)
-        lias = self._get_f('LIAS', f); lips = self._get_f('LIPS', f)
-        
-        rias = rias if rias is not None else rips
-        lias = lias if lias is not None else lips
-        rips = rips if rips is not None else rias
-        lips = lips if lips is not None else lias
-        
+        # 1. Coleta de todos os marcadores pélvicos possíveis
+        rias = self._get_f('RIAS', f)
+        lias = self._get_f('LIAS', f)
+        rips = self._get_f('RIPS', f)
+        lips = self._get_f('LIPS', f)
+        sacr = self._get_f('SACR', f)
         rict = self._get_f('RICT', f)
         lict = self._get_f('LICT', f)
         
-        if rias is not None and lias is not None: s['P_F']=[rias,lias]
-        if rips is not None and lips is not None: s['P_B']=[rips,lips]
-        if rias is not None and rict is not None: s['PR1']=[rias,rict]
-        if rips is not None and rict is not None: s['PR2']=[rias,rict] 
-        if lias is not None and lict is not None: s['PL1']=[lias,lict]
-        if lips is not None and lict is not None: s['PL2']=[lips,lict] 
+        # 2. Criação do "Centro Pélvico Virtual"
+        # Se houver um apagão severo, ele tira a média de tudo que sobrou na cintura
+        pelvis_disponiveis = [m for m in [rias, lias, rips, lips, sacr, rict, lict] if m is not None]
+        centro_pelve = np.mean(pelvis_disponiveis, axis=0) if len(pelvis_disponiveis) > 0 else None
+
+        # 3. Fallback Agressivo para as "Cabeças" do Fêmur (Quadril D e E)
+        # Ordem de busca: ASIS -> PSIS -> Crista Ilíaca -> Sacro -> Centro Pélvico
+        quad_d = rias if rias is not None else (rips if rips is not None else (rict if rict is not None else (sacr if sacr is not None else centro_pelve)))
+        quad_e = lias if lias is not None else (lips if lips is not None else (lict if lict is not None else (sacr if sacr is not None else centro_pelve)))
         
-        kd = self._mid_f('RLE','RME', f)
-        ke = self._mid_f('LLE','LME', f)
-        td = self._mid_f('RML','RMM', f)
-        te = self._mid_f('LML','LMM', f)
+        # Prevenção extrema: se um lado sumir magicamente por completo, projeta baseado no lado oposto
+        if quad_d is None and quad_e is not None: 
+            quad_d = quad_e.copy(); quad_d[1] += 200 # Deslocamento aproximado no eixo Y
+        if quad_e is None and quad_d is not None: 
+            quad_e = quad_d.copy(); quad_e[1] -= 200
+
+        # Desenhando o Cinturão Pélvico
+        if rias is not None and lias is not None: s['P_F'] = [rias, lias]
+        elif quad_d is not None and quad_e is not None: s['P_F'] = [quad_d, quad_e] # Linha genérica
         
-        if rias is not None and kd is not None: s['CX_D']=[rias,kd]
-        if lias is not None and ke is not None: s['CX_E']=[lias,ke]
-        if kd is not None and td is not None: s['PN_D']=[kd,td]
-        if ke is not None and te is not None: s['PN_E']=[ke,te]
+        if rips is not None and lips is not None: s['P_B'] = [rips, lips]
+        if quad_d is not None and rict is not None: s['PR1'] = [quad_d, rict]
+        if quad_e is not None and lict is not None: s['PL1'] = [quad_e, lict]
+        
+        # 4. Fallback Agressivo para Joelhos e Tornozelos
+        kd = self._mid_f('RLE', 'RME', f)
+        ke = self._mid_f('LLE', 'LME', f)
+        kd = kd if kd is not None else (self._get_f('RLE', f) or self._get_f('RKN', f) or self._get_f('RME', f))
+        ke = ke if ke is not None else (self._get_f('LLE', f) or self._get_f('LKN', f) or self._get_f('LME', f))
+        
+        td = self._mid_f('RML', 'RMM', f)
+        te = self._mid_f('LML', 'LMM', f)
+        td = td if td is not None else (self._get_f('RML', f) or self._get_f('RANK', f) or self._get_f('RMM', f))
+        te = te if te is not None else (self._get_f('LML', f) or self._get_f('LANK', f) or self._get_f('LMM', f))
+
+        # 5. Montagem dos Segmentos Primários (Coxa e Perna)
+        if quad_d is not None and kd is not None: s['CX_D'] = [quad_d, kd]
+        if quad_e is not None and ke is not None: s['CX_E'] = [quad_e, ke]
+        if kd is not None and td is not None: s['PN_D'] = [kd, td]
+        if ke is not None and te is not None: s['PN_E'] = [ke, te]
             
+        # 6. Montagem dos Pés com Proteção contra Falta de Calcanhar
         for l, cal_lbl, t1_lbl, t5_lbl, ank in [('D', 'RCAL', 'RFT1', 'RFT5', td), 
                                                 ('E', 'LCAL', 'LFT1', 'LFT5', te)]:
-            cal = self._get_f(cal_lbl, f)
-            t1 = self._get_f(t1_lbl, f)
+            # Tenta pegar RCAL, se não tiver, tenta RHEE (Heel), se não, usa o Tornozelo
+            cal = self._get_f(cal_lbl, f) or self._get_f(f'RHEE' if l == 'D' else 'LHEE', f) or ank
+            # Tenta pegar RFT1 (1st Metatarsal), se não tiver, tenta RTOE (Dedo Genérico)
+            t1 = self._get_f(t1_lbl, f) or self._get_f(f'RTOE' if l == 'D' else 'LTOE', f)
             t5 = self._get_f(t5_lbl, f)
             
-            cal = cal if cal is not None else ank
             t1 = t1 if t1 is not None else (t5 if t5 is not None else cal)
             t5 = t5 if t5 is not None else t1
             
-            if cal is not None and t1 is not None: s[f'P{l}1']=[cal,t1]
-            if cal is not None and t5 is not None: s[f'P{l}2']=[cal,t5]
-            if t1 is not None and t5 is not None: s[f'P{l}3']=[t1,t5]
-            if ank is not None and cal is not None: s[f'P{l}L']=[ank,cal]
+            if cal is not None and t1 is not None: s[f'P{l}1'] = [cal, t1]
+            if cal is not None and t5 is not None: s[f'P{l}2'] = [cal, t5]
+            if t1 is not None and t5 is not None: s[f'P{l}3'] = [t1, t5]
+            if ank is not None and cal is not None: s[f'P{l}L'] = [ank, cal]
+            
         return s
 
     def _desenhar_fundo_bussola(self, ax_c, titulo):
