@@ -370,33 +370,68 @@ class GeradorVisual:
         else: return "ANTI-FASE", '#f1c40f'
 
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        fig = plt.figure(figsize=(16, 9))
-        ax_comp_qj_d = fig.add_axes([0.01, 0.65, 0.15, 0.25]); ax_comp_jt_d = fig.add_axes([0.01, 0.38, 0.15, 0.25])
-        ax_comp_qj_e = fig.add_axes([0.16, 0.65, 0.15, 0.25]); ax_comp_jt_e = fig.add_axes([0.16, 0.38, 0.15, 0.25])
-        ptr_qjd = self._desenhar_fundo_bussola(ax_comp_qj_d, "Coxa-Perna (DIR)"); ptr_jtd = self._desenhar_fundo_bussola(ax_comp_jt_d, "Perna-Pé (DIR)")
-        ptr_qje = self._desenhar_fundo_bussola(ax_comp_qj_e, "Coxa-Perna (ESQ)"); ptr_jte = self._desenhar_fundo_bussola(ax_comp_jt_e, "Perna-Pé (ESQ)")
-        ax_stats_left = fig.add_axes([0.01, 0.02, 0.30, 0.32]); ax_stats_left.axis('off')
+        fig = plt.figure(figsize=(18, 9)) # Ampliado para comportar o novo layout
         
-        ax = fig.add_axes([0.32, 0.20, 0.44, 0.75], projection='3d')
+        # 1. BLOCO ESQUERDO: Bússolas e Padrão Dinâmico
+        ax_cp_d = fig.add_axes([0.02, 0.65, 0.10, 0.15])
+        ax_pp_d = fig.add_axes([0.02, 0.30, 0.10, 0.15])
+        ax_cp_e = fig.add_axes([0.14, 0.65, 0.10, 0.15])
+        ax_pp_e = fig.add_axes([0.14, 0.30, 0.10, 0.15])
+        
+        ptr_cp_d = self._desenhar_fundo_bussola(ax_cp_d, "Coxa-Perna (DIR)")
+        ptr_pp_d = self._desenhar_fundo_bussola(ax_pp_d, "Perna-Pé (DIR)")
+        ptr_cp_e = self._desenhar_fundo_bussola(ax_cp_e, "Coxa-Perna (ESQ)")
+        ptr_pp_e = self._desenhar_fundo_bussola(ax_pp_e, "Perna-Pé (ESQ)")
+        
+        txt_cp_d = fig.add_axes([0.02, 0.60, 0.10, 0.05]); txt_cp_d.axis('off'); t_cp_d = txt_cp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
+        txt_pp_d = fig.add_axes([0.02, 0.25, 0.10, 0.05]); txt_pp_d.axis('off'); t_pp_d = txt_pp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
+        txt_cp_e = fig.add_axes([0.14, 0.60, 0.10, 0.05]); txt_cp_e.axis('off'); t_cp_e = txt_cp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
+        txt_pp_e = fig.add_axes([0.14, 0.25, 0.10, 0.05]); txt_pp_e.axis('off'); t_pp_e = txt_pp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
+        
+        # 2. BLOCO CENTRAL: Modelo 3D (Caminhada Invertida no Eixo X)
+        ax = fig.add_axes([0.25, 0.15, 0.40, 0.80], projection='3d')
         ax.set_xlim(self.box['x']); ax.set_ylim(self.box['y']); ax.set_zlim(self.box['z']); ax.view_init(elev=20, azim=135)
         ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
-        titulo_main = ax.set_title(self.nome_arq, fontsize=12, pad=20)
-        ax_banner = fig.add_axes([0.33, 0.02, 0.43, 0.16]); ax_banner.axis('off')
-        ax_txt = fig.add_axes([0.78, 0.05, 0.21, 0.90]); ax_txt.axis('off')
+        ax.set_title(self.nome_arq, fontsize=12, pad=20)
+        
+        # 3. BLOCO DIREITO: Gráficos Dinâmicos e Fluxo de Cálculo (Lado Direito como Ref.)
+        cx = self.proc.segmentos_df['Coxa_D'].values
+        pn = self.proc.segmentos_df['Perna_D'].values
+        pe = self.proc.segmentos_df['Pe_D'].values
+        frames = np.arange(len(cx))
+        
+        ca_cp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pn), -np.diff(cx))), 360), 0)
+        ca_pp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(pn))), 360), 0)
+        
+        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(frames, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([])
+        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(frames, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([])
+        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(frames, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([])
+        
+        ax_aa_cp = fig.add_axes([0.70, 0.45, 0.10, 0.15]); ax_aa_cp.plot(cx, pn, 'k-', lw=1, alpha=0.4); ax_aa_cp.set_title('Coxa-Perna AA', fontsize=9)
+        ax_aa_pp = fig.add_axes([0.85, 0.45, 0.10, 0.15]); ax_aa_pp.plot(pn, pe, 'k-', lw=1, alpha=0.4); ax_aa_pp.set_title('Perna-Pé AA', fontsize=9)
+        
+        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(frames, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9)
+        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(frames, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9)
+        
+        # Desenho das Flechas Direcionais (Indicando o Fluxo de Geração)
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_c, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_f, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_cp, axesB=ax_ca_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_pp, axesB=ax_ca_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
+        
+        # Pontos Dinâmicos de Rastreio
+        dot_c, = ax_c.plot([], [], 'ro', markersize=6)
+        dot_p, = ax_p.plot([], [], 'ro', markersize=6)
+        dot_f, = ax_f.plot([], [], 'ro', markersize=6)
+        dot_aa_cp, = ax_aa_cp.plot([], [], 'ro', markersize=6)
+        dot_aa_pp, = ax_aa_pp.plot([], [], 'ro', markersize=6)
+        dot_ca_cp, = ax_ca_cp.plot([], [], 'ro', markersize=6)
+        dot_ca_pp, = ax_ca_pp.plot([], [], 'ro', markersize=6)
 
-        stats_ang = self.proc.obter_stats(); coord_norm = self.proc.coord_vetorial
-        ax_stats_left.text(0.5, 1.0, "FREQUÊNCIA NO CICLO DA MARCHA (0-100%)", ha='center', va='top', fontweight='bold', fontsize=10)
-        def format_f(c): return f" Proximal : {c.get('Proximal',0):>3.0f}%\n Em Fase  : {c.get('EmFase',0):>3.0f}%\n Distal   : {c.get('Distal',0):>3.0f}%\n Anti-Fase: {c.get('AntiFase',0):>3.0f}%"
-        col_dir = ">> COXA-PERNA (DIR)\n" + format_f(coord_norm.get('Coxa_Perna_D', {})) + "\n\n>> PERNA-PÉ (DIR)\n" + format_f(coord_norm.get('Perna_Pe_D', {}))
-        col_esq = ">> COXA-PERNA (ESQ)\n" + format_f(coord_norm.get('Coxa_Perna_E', {})) + "\n\n>> PERNA-PÉ (ESQ)\n" + format_f(coord_norm.get('Perna_Pe_E', {}))
-        ax_stats_left.text(0.00, 0.85, col_dir, va='top', fontsize=9, family='monospace'); ax_stats_left.text(0.55, 0.85, col_esq, va='top', fontsize=9, family='monospace')
-
-        ax_banner.text(0.5, 0.90, "COORDENAÇÃO SEGMENTAR EM TEMPO REAL", ha='center', va='top', fontweight='bold', fontsize=11)
-        ax_banner.text(0.00, 0.50, "Coxa-Perna (DIR):", fontweight='bold', fontsize=10); ax_banner.text(0.00, 0.15, "Perna-Pé (DIR):", fontweight='bold', fontsize=10)
-        txt_qj_d = ax_banner.text(0.24, 0.50, "-", fontweight='bold', fontsize=10); txt_jt_d = ax_banner.text(0.24, 0.15, "-", fontweight='bold', fontsize=10)
-        ax_banner.text(0.53, 0.50, "Coxa-Perna (ESQ):", fontweight='bold', fontsize=10); ax_banner.text(0.53, 0.15, "Perna-Pé (ESQ):", fontweight='bold', fontsize=10)
-        txt_qj_e = ax_banner.text(0.77, 0.50, "-", fontweight='bold', fontsize=10); txt_jt_e = ax_banner.text(0.77, 0.15, "-", fontweight='bold', fontsize=10)
-        t_dynamic = ax_txt.text(0.05, 0.95, "", va='top', fontsize=10, family='monospace')
         linhas = {}
 
         def update(i):
@@ -406,23 +441,20 @@ class GeradorVisual:
             for n, (p1, p2) in seg.items():
                 c = 'red' if 'D' in n or 'R' in n else 'blue'
                 if 'P_' in n or 'PL' in n or 'PR' in n: c = 'black'
+                
+                # Invertendo Eixo X apenas no plot (aparentar andar para a frente)
+                x_plot = [-p1[0], -p2[0]] 
+                
                 if n in linhas:
-                    linhas[n].set_data([p1[0],p2[0]],[p1[1],p2[1]]); linhas[n].set_3d_properties([p1[2],p2[2]])
+                    linhas[n].set_data(x_plot, [p1[1],p2[1]]); linhas[n].set_3d_properties([p1[2],p2[2]])
                 else: 
-                    linhas[n], = ax.plot([p1[0],p2[0]],[p1[1],p2[1]],[p1[2],p2[2]], c=c, lw=1.5)
+                    linhas[n], = ax.plot(x_plot, [p1[1],p2[1]], [p1[2],p2[2]], c=c, lw=1.5)
 
-            row = self.proc.angulos_df.iloc[i]
-            info = "DADOS ARTICULARES\n" + "="*17 + "\n\n"
-            for l, l_full in [('D', 'DIREITO (Vermelho)'), ('E', 'ESQUERDO (Azul)')]:
-                info += f">>> LADO {l_full}\n\n"
-                for j, j_full in [('Quad', 'Quadril'), ('Joel', 'Joelho'), ('Torn', 'Tornozelo')]:
-                    s = stats_ang.get(f'{j}_{l}', {'min':0, 'max':0})
-                    info += f"{j_full}:\n  Atual: {row[f'{j}_{l}']:>5.1f}°\n  Mín: {s['min']:>4.0f}° | Máx: {s['max']:>4.0f}°\n\n"
-            t_dynamic.set_text(info)
-
+            # Atualização Bússolas e Textos Inferiores
             if i < self.proc.n_frames - 1:
                 p_prox, p_curr = self.proc.segmentos_df.iloc[i+1], self.proc.segmentos_df.iloc[i]
-                pares = [('Coxa_D', 'Perna_D', ptr_qjd, txt_qj_d), ('Perna_D', 'Pe_D', ptr_jtd, txt_jt_d), ('Coxa_E', 'Perna_E', ptr_qje, txt_qj_e), ('Perna_E', 'Pe_E', ptr_jte, txt_jt_e)]
+                pares = [('Coxa_D', 'Perna_D', ptr_cp_d, t_cp_d), ('Perna_D', 'Pe_D', ptr_pp_d, t_pp_d), 
+                         ('Coxa_E', 'Perna_E', ptr_cp_e, t_cp_e), ('Perna_E', 'Pe_E', ptr_pp_e, t_pp_e)]
                 for j_prox, j_dist, ptr, txt in pares:
                     dx, dy = p_prox[j_prox] - p_curr[j_prox], p_prox[j_dist] - p_curr[j_dist]
                     ang = np.degrees(np.arctan2(dy, dx)) % 360 if not (np.isnan(dx) or np.isnan(dy)) else np.nan
@@ -430,7 +462,13 @@ class GeradorVisual:
                         ptr.set_data([0, np.cos(np.radians(ang))], [0, np.sin(np.radians(ang))])
                         label, cor = self._classificar_angulo(ang)
                         txt.set_text(label); txt.set_color(cor)
-            return list(linhas.values()) + [t_dynamic, txt_qj_d, txt_jt_d, txt_qj_e, txt_jt_e, ptr_qjd, ptr_jtd, ptr_qje, ptr_jte]
+                        
+            # Atualização do Rastreio Dinâmico nos Gráficos à Direita
+            dot_c.set_data([i], [cx[i]]); dot_p.set_data([i], [pn[i]]); dot_f.set_data([i], [pe[i]])
+            dot_aa_cp.set_data([cx[i]], [pn[i]]); dot_aa_pp.set_data([pn[i]], [pe[i]])
+            dot_ca_cp.set_data([i], [ca_cp[i]]); dot_ca_pp.set_data([i], [ca_pp[i]])
+
+            return list(linhas.values()) + [ptr_cp_d, ptr_pp_d, ptr_cp_e, ptr_pp_e, t_cp_d, t_pp_d, t_cp_e, t_pp_e, dot_c, dot_p, dot_f, dot_aa_cp, dot_aa_pp, dot_ca_cp, dot_ca_pp]
 
         ani = animation.FuncAnimation(fig, update, frames=range(0, self.proc.n_frames, step), interval=50)
         try:
@@ -959,43 +997,38 @@ if st.session_state.processadores:
             pares_labels = ['Quad_Joel', 'Joel_Torn']
             pares_nomes = ['Hip-Knee', 'Knee-Ankle']
 
-        freq_acumulada = {g: {c_new: {k: [] for k in bw_padroes} for _, c_new in pares_map} for g in grupos_estudo}
-        for p in st.session_state.processadores:
-            grp = p.grupo
-            for c_old, c_new in pares_map:
-                freqs = p.coord_vetorial.get(c_old, {})
-                for k in bw_padroes.keys():
-                    if not np.isnan(freqs.get(k, np.nan)): freq_acumulada[grp][c_new][k].append(freqs[k])
-                    
-        def compilar_frequencia_bilateral(grupos, pares_origem, fase="Apoio"):
-            dados = {g: {k: 0 for k in bw_padroes} for g in grupos}
+        def compilar_frequencia_bilateral_dp(grupos, pares_origem, fase="Apoio"):
+            dados = {g: {k: {'media': 0, 'dp': 0} for k in bw_padroes} for g in grupos}
             for grp in grupos:
-                m_prox, m_fase, m_dist, m_anti, contagem = 0, 0, 0, 0, 0
+                valores_grp = {k: [] for k in bw_padroes}
                 for p in [proc for proc in st.session_state.processadores if proc.grupo == grp]:
+                    m_prox, m_fase, m_dist, m_anti, contagem = 0, 0, 0, 0, 0
                     for par_chave in pares_origem:
                         lado = par_chave.split('_')[-1]
                         pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
                         idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
                         
                         serie_completa = p.coord_vetorial_series.get(par_chave, [])
-                        if fase == "Apoio":
-                            fatia = serie_completa[:idx_apoio]
-                        else:
-                            fatia = serie_completa[idx_apoio:]
+                        if fase == "Apoio": fatia = serie_completa[:idx_apoio]
+                        else: fatia = serie_completa[idx_apoio:]
                             
                         total = len(fatia)
                         if total > 0:
                             m_prox += fatia.count('Proximal')/total; m_fase += fatia.count('EmFase')/total
                             m_dist += fatia.count('Distal')/total; m_anti += fatia.count('AntiFase')/total
                             contagem += 1
-                denom = contagem if contagem > 0 else 1
-                dados[grp]['Proximal'] = (m_prox/denom)*100
-                dados[grp]['EmFase'] = (m_fase/denom)*100
-                dados[grp]['Distal'] = (m_dist/denom)*100
-                dados[grp]['AntiFase'] = (m_anti/denom)*100
+                    if contagem > 0:
+                        valores_grp['Proximal'].append((m_prox/contagem)*100)
+                        valores_grp['EmFase'].append((m_fase/contagem)*100)
+                        valores_grp['Distal'].append((m_dist/contagem)*100)
+                        valores_grp['AntiFase'].append((m_anti/contagem)*100)
+                
+                for k in bw_padroes:
+                    dados[grp][k]['media'] = np.mean(valores_grp[k]) if len(valores_grp[k]) > 0 else 0
+                    dados[grp][k]['dp'] = np.std(valores_grp[k]) if len(valores_grp[k]) > 0 else 0
             return dados
 
-        st.markdown("### Frequência dos Modos de Coordenação (Média Bilateral)")
+        st.markdown("### Frequência dos Modos de Coordenação (Média Bilateral com Desvio Padrão)")
         sub_freq_apoio, sub_freq_balanco = st.tabs(["🦵 Fase de Apoio", "✈️ Fase de Balanço"])
         
         def plotar_histograma_p_b(ax, dados_comp, titulo):
@@ -1005,12 +1038,15 @@ if st.session_state.processadores:
             
             bottom = np.zeros(len(grps))
             for padrao, estilo in bw_padroes.items():
-                valores = [dados_comp[g][padrao] for g in grps]
-                bars = ax.bar(x, valores, width, bottom=bottom, label=padrao, color=estilo['cor'], edgecolor='black', hatch=estilo['hatch'])
-                for bar in bars:
+                medias = [dados_comp[g][padrao]['media'] for g in grps]
+                dps = [dados_comp[g][padrao]['dp'] for g in grps]
+                bars = ax.bar(x, medias, width, bottom=bottom, label=padrao, color=estilo['cor'], edgecolor='black', hatch=estilo['hatch'])
+                for i, bar in enumerate(bars):
                     h = bar.get_height()
-                    if h > 5.0: ax.text(bar.get_x() + bar.get_width()/2, bar.get_y() + h/2, f"{h:.1f}%", ha='center', va='center', color='black' if padrao != 'AntiFase' else 'white', fontweight='bold', fontsize=9)
-                bottom += np.array(valores)
+                    if h > 5.0: 
+                        texto = f"{medias[i]:.1f}%\n(±{dps[i]:.1f})"
+                        ax.text(bar.get_x() + bar.get_width()/2, bar.get_y() + h/2, texto, ha='center', va='center', color='black' if padrao != 'AntiFase' else 'white', fontweight='bold', fontsize=8)
+                bottom += np.array(medias)
 
             ax.set_title(titulo, fontweight='bold', fontsize=12)
             ax.set_ylabel('Frequency (%)', fontweight='bold')
@@ -1020,7 +1056,7 @@ if st.session_state.processadores:
         with sub_freq_apoio:
             fig_ap, axs_ap = plt.subplots(1, 2, figsize=(12, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
-                dados_ap = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Apoio")
+                dados_ap = compilar_frequencia_bilateral_dp(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Apoio")
                 plotar_histograma_p_b(axs_ap[i], dados_ap, f"{p_nome} (Stance)")
             axs_ap[1].legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Modos", frameon=False)
             plt.tight_layout(); st.pyplot(fig_ap); plt.close(fig_ap)
@@ -1028,7 +1064,7 @@ if st.session_state.processadores:
         with sub_freq_balanco:
             fig_bal, axs_bal = plt.subplots(1, 2, figsize=(12, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
-                dados_bal = compilar_frequencia_bilateral(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Balanco")
+                dados_bal = compilar_frequencia_bilateral_dp(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Balanco")
                 plotar_histograma_p_b(axs_bal[i], dados_bal, f"{p_nome} (Swing)")
             axs_bal[1].legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Modos", frameon=False)
             plt.tight_layout(); st.pyplot(fig_bal); plt.close(fig_bal)
