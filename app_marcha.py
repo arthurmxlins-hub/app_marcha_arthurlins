@@ -427,28 +427,22 @@ class GeradorVisual:
         else: return "ANTI-FASE", '#f1c40f'
 
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        # 1. Isolando estritamente um Ciclo de Marcha (HS a HS do Lado Direito)
-        hss_d = self.proc.eventos['D']['HS']
-        if len(hss_d) >= 2:
-            hs1, hs2 = hss_d[0], hss_d[1]
-        else:
-            hs1, hs2 = 0, max(1, self.proc.n_frames - 1)
-        
-        if hs2 <= hs1: hs2 = hs1 + 1
+        # 1. Utilizar toda a captura (removendo a normalização por ciclo isolado)
+        hs1, hs2 = 0, self.proc.n_frames
         frames_ciclo = np.arange(hs1, hs2)
-        if len(frames_ciclo) < 2: return False, "Ciclo detectado é muito curto para animação."
+        if len(frames_ciclo) < 2: return False, "A captura é demasiado curta para ser animada."
         
-        # Correção da Linha de Toe-Off
-        tos_d = [t for t in self.proc.eventos['D']['TO'] if hs1 < t < hs2]
-        to_frame = tos_d[0] if len(tos_d) > 0 else None
-        pct_to = ((to_frame - hs1) / (hs2 - hs1) * 100) if to_frame is not None else 60.0
-
+        # O eixo X representará de 0 a 100% do tempo total da captura
         x_perc = np.linspace(0, 100, len(frames_ciclo))
 
+        # Identificar todos os eventos de Toe-Off (TO) do lado Direito presentes na captura
+        tos_d = [t for t in self.proc.eventos['D']['TO'] if t < self.proc.n_frames]
+        pcts_to = [(t / self.proc.n_frames) * 100 for t in tos_d]
+
         # 2. Curvas Baseadas Exclusivamente no Membro Direito para plotagem no GIF
-        cx = self.proc.segmentos_df['Coxa_D'].values[hs1:hs2]
-        pn = self.proc.segmentos_df['Perna_D'].values[hs1:hs2]
-        pe = self.proc.segmentos_df['Pe_D'].values[hs1:hs2]
+        cx = self.proc.segmentos_df['Coxa_D'].values
+        pn = self.proc.segmentos_df['Perna_D'].values
+        pe = self.proc.segmentos_df['Pe_D'].values
         
         ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(pn), -np.diff(cx))), 360)
         ca_cp = np.append(ca_cp, ca_cp[-1] if len(ca_cp) > 0 else 0)
@@ -475,18 +469,26 @@ class GeradorVisual:
         ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
         ax.set_title(self.nome_arq, fontsize=12, pad=20)
         
-        # --- BLOCO DIREITO: Gráficos Mapeados do Membro Direito e Flechas Guias ---
-        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(x_perc, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([]); ax_c.axvline(pct_to, color='gray', linestyle='--', lw=1)
-        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(x_perc, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([]); ax_p.axvline(pct_to, color='gray', linestyle='--', lw=1)
-        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(x_perc, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([]); ax_f.axvline(pct_to, color='gray', linestyle='--', lw=1)
+        # --- BLOCO DIREITO: Gráficos Mapeados do Membro Direito ---
+        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(x_perc, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([])
+        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(x_perc, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([])
+        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(x_perc, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([])
         
         ax_aa_cp = fig.add_axes([0.70, 0.45, 0.10, 0.15]); ax_aa_cp.plot(cx, pn, 'k-', lw=1, alpha=0.4); ax_aa_cp.set_title('Coxa-Perna AA', fontsize=9)
         ax_aa_pp = fig.add_axes([0.85, 0.45, 0.10, 0.15]); ax_aa_pp.plot(pn, pe, 'k-', lw=1, alpha=0.4); ax_aa_pp.set_title('Perna-Pé AA', fontsize=9)
         
-        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(x_perc, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9); ax_ca_cp.set_xlabel('% Ciclo (Dir)', fontsize=8); ax_ca_cp.axvline(pct_to, color='gray', linestyle='--', lw=1)
-        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(x_perc, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9); ax_ca_pp.set_xlabel('% Ciclo (Dir)', fontsize=8); ax_ca_pp.axvline(pct_to, color='gray', linestyle='--', lw=1)
+        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(x_perc, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9); ax_ca_cp.set_xlabel('% Captura', fontsize=8)
+        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(x_perc, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9); ax_ca_pp.set_xlabel('% Captura', fontsize=8)
         
-        # Desenhando as setas de conexão do cálculo Vector Coding
+        # Plotar as linhas tracejadas de todos os Toe-Offs encontrados
+        for p_to in pcts_to:
+            ax_c.axvline(p_to, color='gray', linestyle='--', lw=1)
+            ax_p.axvline(p_to, color='gray', linestyle='--', lw=1)
+            ax_f.axvline(p_to, color='gray', linestyle='--', lw=1)
+            ax_ca_cp.axvline(p_to, color='gray', linestyle='--', lw=1)
+            ax_ca_pp.axvline(p_to, color='gray', linestyle='--', lw=1)
+        
+        # Desenhando as setas de conexão funcional do cálculo Vector Coding
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_c, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
@@ -502,8 +504,7 @@ class GeradorVisual:
         linhas = {}
 
         def update(i_frame):
-            real_frame = hs1 + i_frame
-            seg = self.montar_frame(real_frame)
+            seg = self.montar_frame(i_frame)
             for k in list(linhas):
                 if k not in seg: linhas[k].remove(); del linhas[k]
             
@@ -511,7 +512,7 @@ class GeradorVisual:
                 c = 'red' if 'D' in n or 'R' in n else 'blue'
                 if 'P_' in n or 'PL' in n or 'PR' in n: c = 'black'
                 
-                # INVERSÃO NO EIXO X para caminhar "frente"
+                # INVERSÃO NO EIXO X para simular a caminhada em frente
                 x_plot = [-p1[0], -p2[0]] 
                 
                 if n in linhas:
@@ -519,9 +520,9 @@ class GeradorVisual:
                 else: 
                     linhas[n], = ax.plot(x_plot, [p1[1],p2[1]], [p1[2],p2[2]], c=c, lw=1.5)
 
-            # Atualização das Bússolas e Identificadores (Apenas processa se não estourar o limite de frames)
-            if real_frame < self.proc.n_frames - 1:
-                p_prox, p_curr = self.proc.segmentos_df.iloc[real_frame+1], self.proc.segmentos_df.iloc[real_frame]
+            # Atualização das Bússolas (apenas se houver frame seguinte disponível)
+            if i_frame < self.proc.n_frames - 1:
+                p_prox, p_curr = self.proc.segmentos_df.iloc[i_frame+1], self.proc.segmentos_df.iloc[i_frame]
                 pares = [('Coxa_D', 'Perna_D', ptr_cp_d, t_cp_d), ('Perna_D', 'Pe_D', ptr_pp_d, t_pp_d), 
                          ('Coxa_E', 'Perna_E', ptr_cp_e, t_cp_e), ('Perna_E', 'Pe_E', ptr_pp_e, t_pp_e)]
                 for j_prox, j_dist, ptr, txt in pares:
@@ -532,7 +533,7 @@ class GeradorVisual:
                         label, cor = self._classificar_angulo(ang)
                         txt.set_text(label); txt.set_color(cor)
                         
-            # Atualização do Rastreio Vector Coding do Membro Direito
+            # Atualização Dinâmica do Rastreio Vector Coding do Membro Direito
             dot_c.set_data([x_perc[i_frame]], [cx[i_frame]]); dot_p.set_data([x_perc[i_frame]], [pn[i_frame]]); dot_f.set_data([x_perc[i_frame]], [pe[i_frame]])
             dot_aa_cp.set_data([cx[i_frame]], [pn[i_frame]]); dot_aa_pp.set_data([pn[i_frame]], [pe[i_frame]])
             dot_ca_cp.set_data([x_perc[i_frame]], [ca_cp[i_frame]]); dot_ca_pp.set_data([x_perc[i_frame]], [ca_pp[i_frame]])
@@ -543,8 +544,10 @@ class GeradorVisual:
         try:
             ani.save(caminho_final, writer='pillow', fps=fps_anim)
             return True, caminho_final
-        except Exception as e: return False, str(e)
-        finally: plt.close(fig); plt.close('all')
+        except Exception as e: 
+            return False, str(e)
+        finally: 
+            plt.close(fig); plt.close('all')
 # =============================================================================
 # INTERFACE WEB STREAMLIT
 # =============================================================================
