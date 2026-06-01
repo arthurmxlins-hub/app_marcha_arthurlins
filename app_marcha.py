@@ -323,11 +323,25 @@ class GeradorVisual:
         self.proc = processador; self.nome_arq = nome_original
         self.box = {'x': (-1000, 1000), 'y': (-1000, 1000), 'z': (0, 2000)}
 
+    def _get_f(self, n, f): return self.proc._get(n, f)
+    
+    def _mid_f(self, n1, n2, f):
+        p1, p2 = self._get_f(n1, f), self._get_f(n2, f)
+        if p1 is not None and p2 is not None: return (p1+p2)/2
+        if p1 is not None: return p1
+        if p2 is not None: return p2
+        return None
+
     def montar_frame(self, f):
         s = {}
-        get = lambda n: self.proc._get(n, f)
-        mid = lambda n1, n2: self.proc._mid(n1, n2, f)
-        rias, lias = get('RIAS'), get('LIAS'); rips, lips = get('RIPS'), get('LIPS'); rict, lict = get('RICT'), get('LICT')
+        # Reforço de marcadores C3D com fallback (Prevenção de apagões)
+        rias = self._get_f('RIAS', f) or self._get_f('RIPS', f)
+        lias = self._get_f('LIAS', f) or self._get_f('LIPS', f)
+        rips = self._get_f('RIPS', f) or rias
+        lips = self._get_f('LIPS', f) or lias
+        rict = self._get_f('RICT', f)
+        lict = self._get_f('LICT', f)
+        
         if rias is not None and lias is not None: s['P_F']=[rias,lias]
         if rips is not None and lips is not None: s['P_B']=[rips,lips]
         if rias is not None and rict is not None: s['PR1']=[rias,rict]
@@ -335,13 +349,19 @@ class GeradorVisual:
         if lias is not None and lict is not None: s['PL1']=[lias,lict]
         if lips is not None and lict is not None: s['PL2']=[lips,lict] 
         
-        kd, ke = mid('RLE','RME'), mid('LLE','LME'); td, te = mid('RML','RMM'), mid('LML','LMM')
+        kd, ke = self._mid_f('RLE','RME', f), self._mid_f('LLE','LME', f)
+        td, te = self._mid_f('RML','RMM', f), self._mid_f('LML','LMM', f)
+        
         if rias is not None and kd is not None: s['CX_D']=[rias,kd]
         if lias is not None and ke is not None: s['CX_E']=[lias,ke]
         if kd is not None and td is not None: s['PN_D']=[kd,td]
         if ke is not None and te is not None: s['PN_E']=[ke,te]
             
-        for l, cal, t1, t5, ank in [('D', get('RCAL'), get('RFT1'), get('RFT5'), td), ('E', get('LCAL'), get('LFT1'), get('LFT5'), te)]:
+        for l, cal, t1, t5, ank in [('D', self._get_f('RCAL',f), self._get_f('RFT1',f), self._get_f('RFT5',f), td), 
+                                    ('E', self._get_f('LCAL',f), self._get_f('LFT1',f), self._get_f('LFT5',f), te)]:
+            cal = cal or ank
+            t1 = t1 or t5 or cal
+            t5 = t5 or t1
             if cal is not None and t1 is not None: s[f'P{l}1']=[cal,t1]
             if cal is not None and t5 is not None: s[f'P{l}2']=[cal,t5]
             if t1 is not None and t5 is not None: s[f'P{l}3']=[t1,t5]
@@ -370,60 +390,70 @@ class GeradorVisual:
         else: return "ANTI-FASE", '#f1c40f'
 
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        fig = plt.figure(figsize=(18, 9)) # Ampliado para comportar o novo layout
+        # 1. Identificar exato UM ciclo baseado no evento de Heel Strike (Zeni) do lado Direito
+        hss_d = self.proc.eventos['D']['HS']
+        if len(hss_d) >= 2:
+            hs1, hs2 = hss_d[0], hss_d[1]
+        else:
+            hs1, hs2 = 0, self.proc.n_frames - 1
+
+        # Mapeando o evento de Toe Off (TO) para gerar a linha pontilhada divisória
+        tos_d = [t for t in self.proc.eventos['D']['TO'] if hs1 < t < hs2]
+        to_frame = tos_d[0] if tos_d else None
+        pct_to = ((to_frame - hs1) / (hs2 - hs1) * 100) if to_frame else 60.0
+
+        frames_ciclo = np.arange(hs1, hs2)
+        if len(frames_ciclo) == 0: return False, "Ciclo vazio"
+        x_perc = np.linspace(0, 100, len(frames_ciclo))
+
+        # 2. Separando apenas as Curvas do Membro Inferior Direito para o rastreio (Cortadas no ciclo exato)
+        cx = self.proc.segmentos_df['Coxa_D'].values[hs1:hs2]
+        pn = self.proc.segmentos_df['Perna_D'].values[hs1:hs2]
+        pe = self.proc.segmentos_df['Pe_D'].values[hs1:hs2]
         
-        # 1. BLOCO ESQUERDO: Bússolas e Padrão Dinâmico
-        ax_cp_d = fig.add_axes([0.02, 0.65, 0.10, 0.15])
-        ax_pp_d = fig.add_axes([0.02, 0.30, 0.10, 0.15])
-        ax_cp_e = fig.add_axes([0.14, 0.65, 0.10, 0.15])
-        ax_pp_e = fig.add_axes([0.14, 0.30, 0.10, 0.15])
+        ca_cp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pn), -np.diff(cx))), 360), 0)
+        ca_pp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(pn))), 360), 0)
+
+        fig = plt.figure(figsize=(18, 9))
         
-        ptr_cp_d = self._desenhar_fundo_bussola(ax_cp_d, "Coxa-Perna (DIR)")
-        ptr_pp_d = self._desenhar_fundo_bussola(ax_pp_d, "Perna-Pé (DIR)")
-        ptr_cp_e = self._desenhar_fundo_bussola(ax_cp_e, "Coxa-Perna (ESQ)")
-        ptr_pp_e = self._desenhar_fundo_bussola(ax_pp_e, "Perna-Pé (ESQ)")
+        # --- BLOCO ESQUERDO: Bússolas ---
+        ax_cp_d = fig.add_axes([0.02, 0.65, 0.10, 0.15]); ax_pp_d = fig.add_axes([0.02, 0.30, 0.10, 0.15])
+        ax_cp_e = fig.add_axes([0.14, 0.65, 0.10, 0.15]); ax_pp_e = fig.add_axes([0.14, 0.30, 0.10, 0.15])
+        
+        ptr_cp_d = self._desenhar_fundo_bussola(ax_cp_d, "Coxa-Perna (DIR)"); ptr_pp_d = self._desenhar_fundo_bussola(ax_pp_d, "Perna-Pé (DIR)")
+        ptr_cp_e = self._desenhar_fundo_bussola(ax_cp_e, "Coxa-Perna (ESQ)"); ptr_pp_e = self._desenhar_fundo_bussola(ax_pp_e, "Perna-Pé (ESQ)")
         
         txt_cp_d = fig.add_axes([0.02, 0.60, 0.10, 0.05]); txt_cp_d.axis('off'); t_cp_d = txt_cp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
         txt_pp_d = fig.add_axes([0.02, 0.25, 0.10, 0.05]); txt_pp_d.axis('off'); t_pp_d = txt_pp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
         txt_cp_e = fig.add_axes([0.14, 0.60, 0.10, 0.05]); txt_cp_e.axis('off'); t_cp_e = txt_cp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
         txt_pp_e = fig.add_axes([0.14, 0.25, 0.10, 0.05]); txt_pp_e.axis('off'); t_pp_e = txt_pp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
         
-        # 2. BLOCO CENTRAL: Modelo 3D (Caminhada Invertida no Eixo X)
+        # --- BLOCO CENTRAL: Modelo 3D ---
         ax = fig.add_axes([0.25, 0.15, 0.40, 0.80], projection='3d')
         ax.set_xlim(self.box['x']); ax.set_ylim(self.box['y']); ax.set_zlim(self.box['z']); ax.view_init(elev=20, azim=135)
         ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
         ax.set_title(self.nome_arq, fontsize=12, pad=20)
         
-        # 3. BLOCO DIREITO: Gráficos Dinâmicos e Fluxo de Cálculo (Lado Direito como Ref.)
-        cx = self.proc.segmentos_df['Coxa_D'].values
-        pn = self.proc.segmentos_df['Perna_D'].values
-        pe = self.proc.segmentos_df['Pe_D'].values
-        frames = np.arange(len(cx))
-        
-        ca_cp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pn), -np.diff(cx))), 360), 0)
-        ca_pp = np.append(np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(pn))), 360), 0)
-        
-        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(frames, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([])
-        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(frames, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([])
-        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(frames, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([])
+        # --- BLOCO DIREITO: Dinâmicos Apenas do Lado Direito ---
+        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(x_perc, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([]); ax_c.axvline(pct_to, color='gray', linestyle='--', lw=1)
+        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(x_perc, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([]); ax_p.axvline(pct_to, color='gray', linestyle='--', lw=1)
+        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(x_perc, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([]); ax_f.axvline(pct_to, color='gray', linestyle='--', lw=1)
         
         ax_aa_cp = fig.add_axes([0.70, 0.45, 0.10, 0.15]); ax_aa_cp.plot(cx, pn, 'k-', lw=1, alpha=0.4); ax_aa_cp.set_title('Coxa-Perna AA', fontsize=9)
         ax_aa_pp = fig.add_axes([0.85, 0.45, 0.10, 0.15]); ax_aa_pp.plot(pn, pe, 'k-', lw=1, alpha=0.4); ax_aa_pp.set_title('Perna-Pé AA', fontsize=9)
         
-        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(frames, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9)
-        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(frames, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9)
+        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(x_perc, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9); ax_ca_cp.set_xlabel('% Ciclo (Direito)', fontsize=8); ax_ca_cp.axvline(pct_to, color='gray', linestyle='--', lw=1)
+        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(x_perc, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9); ax_ca_pp.set_xlabel('% Ciclo (Direito)', fontsize=8); ax_ca_pp.axvline(pct_to, color='gray', linestyle='--', lw=1)
         
-        # Desenho das Flechas Direcionais (Indicando o Fluxo de Geração)
+        # --- FLECHAS INFORMATIVAS (Desenhando hierarquia funcional) ---
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_c, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_f, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_cp, axesB=ax_ca_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_pp, axesB=ax_ca_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
         
-        # Pontos Dinâmicos de Rastreio
+        # Declarando os pontos de rastreamento no modelo dinâmico
         dot_c, = ax_c.plot([], [], 'ro', markersize=6)
         dot_p, = ax_p.plot([], [], 'ro', markersize=6)
         dot_f, = ax_f.plot([], [], 'ro', markersize=6)
@@ -434,15 +464,17 @@ class GeradorVisual:
 
         linhas = {}
 
-        def update(i):
-            seg = self.montar_frame(i)
+        def update(i_frame):
+            real_frame = hs1 + i_frame
+            seg = self.montar_frame(real_frame)
             for k in list(linhas):
                 if k not in seg: linhas[k].remove(); del linhas[k]
+            
             for n, (p1, p2) in seg.items():
                 c = 'red' if 'D' in n or 'R' in n else 'blue'
                 if 'P_' in n or 'PL' in n or 'PR' in n: c = 'black'
                 
-                # Invertendo Eixo X apenas no plot (aparentar andar para a frente)
+                # INVERSÃO NO EIXO X: o modelo caminha projetado para a frente (-x)
                 x_plot = [-p1[0], -p2[0]] 
                 
                 if n in linhas:
@@ -450,9 +482,8 @@ class GeradorVisual:
                 else: 
                     linhas[n], = ax.plot(x_plot, [p1[1],p2[1]], [p1[2],p2[2]], c=c, lw=1.5)
 
-            # Atualização Bússolas e Textos Inferiores
-            if i < self.proc.n_frames - 1:
-                p_prox, p_curr = self.proc.segmentos_df.iloc[i+1], self.proc.segmentos_df.iloc[i]
+            if real_frame < self.proc.n_frames - 1:
+                p_prox, p_curr = self.proc.segmentos_df.iloc[real_frame+1], self.proc.segmentos_df.iloc[real_frame]
                 pares = [('Coxa_D', 'Perna_D', ptr_cp_d, t_cp_d), ('Perna_D', 'Pe_D', ptr_pp_d, t_pp_d), 
                          ('Coxa_E', 'Perna_E', ptr_cp_e, t_cp_e), ('Perna_E', 'Pe_E', ptr_pp_e, t_pp_e)]
                 for j_prox, j_dist, ptr, txt in pares:
@@ -463,20 +494,19 @@ class GeradorVisual:
                         label, cor = self._classificar_angulo(ang)
                         txt.set_text(label); txt.set_color(cor)
                         
-            # Atualização do Rastreio Dinâmico nos Gráficos à Direita
-            dot_c.set_data([i], [cx[i]]); dot_p.set_data([i], [pn[i]]); dot_f.set_data([i], [pe[i]])
-            dot_aa_cp.set_data([cx[i]], [pn[i]]); dot_aa_pp.set_data([pn[i]], [pe[i]])
-            dot_ca_cp.set_data([i], [ca_cp[i]]); dot_ca_pp.set_data([i], [ca_pp[i]])
+            # Atualização em Tempo Real do Ponto Vermelho (Rastreio)
+            dot_c.set_data([x_perc[i_frame]], [cx[i_frame]]); dot_p.set_data([x_perc[i_frame]], [pn[i_frame]]); dot_f.set_data([x_perc[i_frame]], [pe[i_frame]])
+            dot_aa_cp.set_data([cx[i_frame]], [pn[i_frame]]); dot_aa_pp.set_data([pn[i_frame]], [pe[i_frame]])
+            dot_ca_cp.set_data([x_perc[i_frame]], [ca_cp[i_frame]]); dot_ca_pp.set_data([x_perc[i_frame]], [ca_pp[i_frame]])
 
             return list(linhas.values()) + [ptr_cp_d, ptr_pp_d, ptr_cp_e, ptr_pp_e, t_cp_d, t_pp_d, t_cp_e, t_pp_e, dot_c, dot_p, dot_f, dot_aa_cp, dot_aa_pp, dot_ca_cp, dot_ca_pp]
 
-        ani = animation.FuncAnimation(fig, update, frames=range(0, self.proc.n_frames, step), interval=50)
+        ani = animation.FuncAnimation(fig, update, frames=range(0, len(frames_ciclo), step), interval=50)
         try:
             ani.save(caminho_final, writer='pillow', fps=fps_anim)
             return True, caminho_final
         except Exception as e: return False, str(e)
         finally: plt.close(fig); plt.close('all')
-
 # =============================================================================
 # INTERFACE WEB STREAMLIT
 # =============================================================================
@@ -1043,18 +1073,20 @@ if st.session_state.processadores:
                 bars = ax.bar(x, medias, width, bottom=bottom, label=padrao, color=estilo['cor'], edgecolor='black', hatch=estilo['hatch'])
                 for i, bar in enumerate(bars):
                     h = bar.get_height()
-                    if h > 5.0: 
-                        texto = f"{medias[i]:.1f}%\n(±{dps[i]:.1f})"
-                        ax.text(bar.get_x() + bar.get_width()/2, bar.get_y() + h/2, texto, ha='center', va='center', color='black' if padrao != 'AntiFase' else 'white', fontweight='bold', fontsize=8)
+                    if h > 4.0: 
+                        texto = f"{medias[i]:.1f}% (±{dps[i]:.1f})"
+                        # Texto plotado AO LADO da coluna (get_width() + offset)
+                        ax.text(bar.get_x() + bar.get_width() + 0.05, bar.get_y() + h/2, texto, ha='left', va='center', color='black', fontweight='bold', fontsize=8)
                 bottom += np.array(medias)
 
             ax.set_title(titulo, fontweight='bold', fontsize=12)
             ax.set_ylabel('Frequency (%)', fontweight='bold')
             ax.set_xticks(x); ax.set_xticklabels(grps, fontweight='bold', fontsize=10)
             ax.set_ylim(0, 105)
+            ax.set_xlim(-0.5, len(grps) + 0.5) # Expandido para caber o texto ao lado
 
         with sub_freq_apoio:
-            fig_ap, axs_ap = plt.subplots(1, 2, figsize=(12, 5))
+            fig_ap, axs_ap = plt.subplots(1, 2, figsize=(13, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
                 dados_ap = compilar_frequencia_bilateral_dp(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Apoio")
                 plotar_histograma_p_b(axs_ap[i], dados_ap, f"{p_nome} (Stance)")
@@ -1062,7 +1094,7 @@ if st.session_state.processadores:
             plt.tight_layout(); st.pyplot(fig_ap); plt.close(fig_ap)
 
         with sub_freq_balanco:
-            fig_bal, axs_bal = plt.subplots(1, 2, figsize=(12, 5))
+            fig_bal, axs_bal = plt.subplots(1, 2, figsize=(13, 5))
             for i, (p_label, p_nome) in enumerate(zip(pares_labels, pares_nomes)):
                 dados_bal = compilar_frequencia_bilateral_dp(grupos_estudo, [f"{p_label}_D", f"{p_label}_E"], fase="Balanco")
                 plotar_histograma_p_b(axs_bal[i], dados_bal, f"{p_nome} (Swing)")
