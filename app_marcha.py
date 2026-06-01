@@ -320,239 +320,137 @@ class ProcessadorCinematico:
 # =============================================================================
 class GeradorVisual:
     def __init__(self, processador, nome_original):
-        self.proc = processador; self.nome_arq = nome_original
+        self.proc = processador
+        self.nome_arq = nome_original
+        # Limites do box 3D (ajustáveis conforme o tamanho da sua sala de captura)
         self.box = {'x': (-1000, 1000), 'y': (-1000, 1000), 'z': (0, 2000)}
 
-    def _get_f(self, n, f): 
-        return self.proc._get(n, f)
+    def _get_f(self, n, f):
+        try:
+            return self.proc._get(n, f)
+        except Exception:
+            return None
     
     def _mid_f(self, n1, n2, f):
         p1 = self._get_f(n1, f)
         p2 = self._get_f(n2, f)
-        if p1 is not None and p2 is not None: return (p1+p2)/2
+        if p1 is not None and p2 is not None: return (p1 + p2) / 2
         if p1 is not None: return p1
         if p2 is not None: return p2
         return None
 
     def montar_frame(self, f):
         s = {}
-        # 1. Coleta de todos os marcadores pélvicos possíveis
-        rias = self._get_f('RIAS', f)
-        lias = self._get_f('LIAS', f)
-        rips = self._get_f('RIPS', f)
-        lips = self._get_f('LIPS', f)
-        sacr = self._get_f('SACR', f)
-        rict = self._get_f('RICT', f)
-        lict = self._get_f('LICT', f)
         
-        # 2. Criação do "Centro Pélvico Virtual"
-        # Se houver um apagão severo, ele tira a média de tudo que sobrou na cintura
-        pelvis_disponiveis = [m for m in [rias, lias, rips, lips, sacr, rict, lict] if m is not None]
-        centro_pelve = np.mean(pelvis_disponiveis, axis=0) if len(pelvis_disponiveis) > 0 else None
+        # --- PELVE ---
+        rias = self._get_f('RIAS', f) or self._get_f('RASI', f)
+        lias = self._get_f('LIAS', f) or self._get_f('LASI', f)
+        rips = self._get_f('RIPS', f) or self._get_f('RPSI', f)
+        lips = self._get_f('LIPS', f) or self._get_f('LPSI', f)
+        
+        if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
+        if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
+        if rias is not None and rips is not None: s['Pelve_Dir'] = [rias, rips]
+        if lias is not None and lips is not None: s['Pelve_Esq'] = [lias, lips]
+        
+        # Ponto âncora do quadril (Simplificado: ASIS ou PSIS)
+        quad_d = rias if rias is not None else rips
+        quad_e = lias if lias is not None else lips
 
-        # 3. Fallback Agressivo para as "Cabeças" do Fêmur (Quadril D e E)
-        # Ordem de busca: ASIS -> PSIS -> Crista Ilíaca -> Sacro -> Centro Pélvico
-        quad_d = rias if rias is not None else (rips if rips is not None else (rict if rict is not None else (sacr if sacr is not None else centro_pelve)))
-        quad_e = lias if lias is not None else (lips if lips is not None else (lict if lict is not None else (sacr if sacr is not None else centro_pelve)))
-        
-        # Prevenção extrema: se um lado sumir magicamente por completo, projeta baseado no lado oposto
-        if quad_d is None and quad_e is not None: 
-            quad_d = quad_e.copy(); quad_d[1] += 200 # Deslocamento aproximado no eixo Y
-        if quad_e is None and quad_d is not None: 
-            quad_e = quad_d.copy(); quad_e[1] -= 200
+        # --- JOELHOS ---
+        kd = self._mid_f('RLE', 'RME', f) or self._get_f('RLE', f) or self._get_f('RKN', f)
+        ke = self._mid_f('LLE', 'LME', f) or self._get_f('LLE', f) or self._get_f('LKN', f)
 
-        # Desenhando o Cinturão Pélvico
-        if rias is not None and lias is not None: s['P_F'] = [rias, lias]
-        elif quad_d is not None and quad_e is not None: s['P_F'] = [quad_d, quad_e] # Linha genérica
-        
-        if rips is not None and lips is not None: s['P_B'] = [rips, lips]
-        if quad_d is not None and rict is not None: s['PR1'] = [quad_d, rict]
-        if quad_e is not None and lict is not None: s['PL1'] = [quad_e, lict]
-        
-        # 4. Fallback Agressivo para Joelhos e Tornozelos
-        kd = self._mid_f('RLE', 'RME', f)
-        ke = self._mid_f('LLE', 'LME', f)
-        kd = kd if kd is not None else (self._get_f('RLE', f) or self._get_f('RKN', f) or self._get_f('RME', f))
-        ke = ke if ke is not None else (self._get_f('LLE', f) or self._get_f('LKN', f) or self._get_f('LME', f))
-        
-        td = self._mid_f('RML', 'RMM', f)
-        te = self._mid_f('LML', 'LMM', f)
-        td = td if td is not None else (self._get_f('RML', f) or self._get_f('RANK', f) or self._get_f('RMM', f))
-        te = te if te is not None else (self._get_f('LML', f) or self._get_f('LANK', f) or self._get_f('LMM', f))
+        # --- TORNOZELOS ---
+        td = self._mid_f('RML', 'RMM', f) or self._get_f('RML', f) or self._get_f('RANK', f)
+        te = self._mid_f('LML', 'LMM', f) or self._get_f('LML', f) or self._get_f('LANK', f)
 
-        # 5. Montagem dos Segmentos Primários (Coxa e Perna)
-        if quad_d is not None and kd is not None: s['CX_D'] = [quad_d, kd]
-        if quad_e is not None and ke is not None: s['CX_E'] = [quad_e, ke]
-        if kd is not None and td is not None: s['PN_D'] = [kd, td]
-        if ke is not None and te is not None: s['PN_E'] = [ke, te]
-            
-        # 6. Montagem dos Pés com Proteção contra Falta de Calcanhar
-        for l, cal_lbl, t1_lbl, t5_lbl, ank in [('D', 'RCAL', 'RFT1', 'RFT5', td), 
-                                                ('E', 'LCAL', 'LFT1', 'LFT5', te)]:
-            # Tenta pegar RCAL, se não tiver, tenta RHEE (Heel), se não, usa o Tornozelo
-            cal = self._get_f(cal_lbl, f) or self._get_f(f'RHEE' if l == 'D' else 'LHEE', f) or ank
-            # Tenta pegar RFT1 (1st Metatarsal), se não tiver, tenta RTOE (Dedo Genérico)
-            t1 = self._get_f(t1_lbl, f) or self._get_f(f'RTOE' if l == 'D' else 'LTOE', f)
-            t5 = self._get_f(t5_lbl, f)
-            
-            t1 = t1 if t1 is not None else (t5 if t5 is not None else cal)
-            t5 = t5 if t5 is not None else t1
-            
-            if cal is not None and t1 is not None: s[f'P{l}1'] = [cal, t1]
-            if cal is not None and t5 is not None: s[f'P{l}2'] = [cal, t5]
-            if t1 is not None and t5 is not None: s[f'P{l}3'] = [t1, t5]
-            if ank is not None and cal is not None: s[f'P{l}L'] = [ank, cal]
-            
+        # Segmentos da Coxa
+        if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
+        if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
+
+        # Segmentos da Perna
+        if kd is not None and td is not None: s['Perna_D'] = [kd, td]
+        if ke is not None and te is not None: s['Perna_E'] = [ke, te]
+
+        # --- PÉS ---
+        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f)
+        h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
+        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f)
+        t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
+
+        if td is not None and h_d is not None: s['Pe_Calcanhar_D'] = [td, h_d]
+        if td is not None and t_d is not None: s['Pe_Ponta_D'] = [td, t_d]
+        if h_d is not None and t_d is not None: s['Pe_Sola_D'] = [h_d, t_d]
+
+        if te is not None and h_e is not None: s['Pe_Calcanhar_E'] = [te, h_e]
+        if te is not None and t_e is not None: s['Pe_Ponta_E'] = [te, t_e]
+        if h_e is not None and t_e is not None: s['Pe_Sola_E'] = [h_e, t_e]
+
         return s
 
-    def _desenhar_fundo_bussola(self, ax_c, titulo):
-        ax_c.set_xlim(-1.2, 1.2); ax_c.set_ylim(-1.2, 1.2); ax_c.axis('off'); ax_c.set_aspect('equal')
-        ax_c.text(0, 1.35, titulo, ha='center', va='center', fontsize=9, fontweight='bold')
-        categorias = [((0, 22.5), '#e74c3c'), ((337.5, 360), '#e74c3c'), ((157.5, 202.5), '#e74c3c'),
-                      ((22.5, 67.5), '#2ecc71'), ((202.5, 247.5), '#2ecc71'),
-                      ((67.5, 112.5), '#3498db'), ((247.5, 292.5), '#3498db'),
-                      ((112.5, 157.5), '#f1c40f'), ((292.5, 337.5), '#f1c40f')]
-        for (t1, t2), cor in categorias: 
-            ax_c.add_patch(mpatches.Wedge((0,0), 1.0, t1, t2, facecolor=cor, alpha=0.35, edgecolor='white', lw=1))
-        ax_c.plot([0], [0], marker='o', color='black', markersize=4)
-        ptr, = ax_c.plot([], [], color='black', lw=2.5)
-        return ptr
-
-    def _classificar_angulo(self, angulo):
-        if np.isnan(angulo): return "-", "gray"
-        a = angulo % 360
-        if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): return "PROXIMAL", '#e74c3c'
-        elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): return "EM FASE", '#2ecc71'
-        elif (67.5 <= a < 112.5) or (247.5 <= a < 292.5): return "DISTAL", '#3498db'
-        else: return "ANTI-FASE", '#f1c40f'
-
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        # 1. REMOÇÃO DE TODA NORMALIZAÇÃO: Segurança absoluta usando o tamanho bruto dos dados
-        total_frames = min(self.proc.n_frames, len(self.proc.segmentos_df))
-        if total_frames < 2: 
-            return False, "Captura possui dados insuficientes para animação."
+        # Varredura bruta baseada unicamente na quantidade de frames que o C3D informou
+        total_frames = self.proc.n_frames
         
-        # Eixo X representando de 0 a 100% do arquivo total
-        x_perc = np.linspace(0, 100, total_frames)
+        if total_frames < 2:
+            return False, "O arquivo possui poucos frames para gerar uma animação."
 
-        # Extrair Toe-Offs (Zeni) apenas para marcação visual nos gráficos, convertidos em % da captura
-        tos_d = [t for t in self.proc.eventos['D']['TO'] if t < total_frames]
-        pcts_to = [(t / total_frames) * 100 for t in tos_d]
-
-        # 2. Dados brutos contínuos do Membro Direito (sem cortes)
-        cx = self.proc.segmentos_df['Coxa_D'].values[:total_frames]
-        pn = self.proc.segmentos_df['Perna_D'].values[:total_frames]
-        pe = self.proc.segmentos_df['Pe_D'].values[:total_frames]
+        # Configuração do gráfico único
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
         
-        # Cálculo contínuo do Vector Coding
-        ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(pn), -np.diff(cx))), 360)
-        ca_cp = np.append(ca_cp, ca_cp[-1] if len(ca_cp) > 0 else 0)
-        ca_pp = np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(pn))), 360)
-        ca_pp = np.append(ca_pp, ca_pp[-1] if len(ca_pp) > 0 else 0)
-
-        fig = plt.figure(figsize=(18, 9))
-        
-        # --- BLOCO ESQUERDO: 4 Bússolas ---
-        ax_cp_d = fig.add_axes([0.02, 0.65, 0.10, 0.15]); ax_pp_d = fig.add_axes([0.02, 0.30, 0.10, 0.15])
-        ax_cp_e = fig.add_axes([0.14, 0.65, 0.10, 0.15]); ax_pp_e = fig.add_axes([0.14, 0.30, 0.10, 0.15])
-        
-        ptr_cp_d = self._desenhar_fundo_bussola(ax_cp_d, "Coxa-Perna (DIR)"); ptr_pp_d = self._desenhar_fundo_bussola(ax_pp_d, "Perna-Pé (DIR)")
-        ptr_cp_e = self._desenhar_fundo_bussola(ax_cp_e, "Coxa-Perna (ESQ)"); ptr_pp_e = self._desenhar_fundo_bussola(ax_pp_e, "Perna-Pé (ESQ)")
-        
-        txt_cp_d = fig.add_axes([0.02, 0.60, 0.10, 0.05]); txt_cp_d.axis('off'); t_cp_d = txt_cp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
-        txt_pp_d = fig.add_axes([0.02, 0.25, 0.10, 0.05]); txt_pp_d.axis('off'); t_pp_d = txt_pp_d.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
-        txt_cp_e = fig.add_axes([0.14, 0.60, 0.10, 0.05]); txt_cp_e.axis('off'); t_cp_e = txt_cp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
-        txt_pp_e = fig.add_axes([0.14, 0.25, 0.10, 0.05]); txt_pp_e.axis('off'); t_pp_e = txt_pp_e.text(0.5, 0.5, "-", ha='center', va='center', fontweight='bold', fontsize=11)
-        
-        # --- BLOCO CENTRAL: Modelo 3D ---
-        ax = fig.add_axes([0.25, 0.15, 0.40, 0.80], projection='3d')
-        ax.set_xlim(self.box['x']); ax.set_ylim(self.box['y']); ax.set_zlim(self.box['z']); ax.view_init(elev=20, azim=135)
-        ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
-        ax.set_title(self.nome_arq, fontsize=12, pad=20)
-        
-        # --- BLOCO DIREITO: Gráficos Mapeados do Membro Direito ---
-        ax_c = fig.add_axes([0.68, 0.75, 0.08, 0.15]); ax_c.plot(x_perc, cx, 'k-', lw=1, alpha=0.4); ax_c.set_title('Coxa (°)', fontsize=9); ax_c.set_xticks([])
-        ax_p = fig.add_axes([0.80, 0.75, 0.08, 0.15]); ax_p.plot(x_perc, pn, 'k-', lw=1, alpha=0.4); ax_p.set_title('Perna (°)', fontsize=9); ax_p.set_xticks([])
-        ax_f = fig.add_axes([0.91, 0.75, 0.08, 0.15]); ax_f.plot(x_perc, pe, 'k-', lw=1, alpha=0.4); ax_f.set_title('Pé (°)', fontsize=9); ax_f.set_xticks([])
-        
-        ax_aa_cp = fig.add_axes([0.70, 0.45, 0.10, 0.15]); ax_aa_cp.plot(cx, pn, 'k-', lw=1, alpha=0.4); ax_aa_cp.set_title('Coxa-Perna AA', fontsize=9)
-        ax_aa_pp = fig.add_axes([0.85, 0.45, 0.10, 0.15]); ax_aa_pp.plot(pn, pe, 'k-', lw=1, alpha=0.4); ax_aa_pp.set_title('Perna-Pé AA', fontsize=9)
-        
-        ax_ca_cp = fig.add_axes([0.70, 0.15, 0.10, 0.15]); ax_ca_cp.plot(x_perc, ca_cp, 'k-', lw=1, alpha=0.4); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title('CA Coxa-Perna (°)', fontsize=9); ax_ca_cp.set_xlabel('% Captura', fontsize=8)
-        ax_ca_pp = fig.add_axes([0.85, 0.15, 0.10, 0.15]); ax_ca_pp.plot(x_perc, ca_pp, 'k-', lw=1, alpha=0.4); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title('CA Perna-Pé (°)', fontsize=9); ax_ca_pp.set_xlabel('% Captura', fontsize=8)
-        
-        # Plotar as linhas tracejadas dos Toe-Offs
-        for p_to in pcts_to:
-            ax_c.axvline(p_to, color='gray', linestyle='--', lw=1)
-            ax_p.axvline(p_to, color='gray', linestyle='--', lw=1)
-            ax_f.axvline(p_to, color='gray', linestyle='--', lw=1)
-            ax_ca_cp.axvline(p_to, color='gray', linestyle='--', lw=1)
-            ax_ca_pp.axvline(p_to, color='gray', linestyle='--', lw=1)
-        
-        # Flechas de fluxo
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_c, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.2, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_p, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.8, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_f, axesB=ax_aa_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_cp, axesB=ax_ca_cp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        fig.add_artist(mpatches.ConnectionPatch(xyA=(0.5, 0), xyB=(0.5, 1), coordsA='axes fraction', coordsB='axes fraction', axesA=ax_aa_pp, axesB=ax_ca_pp, arrowstyle="-|>", lw=1.5, color='gray', mutation_scale=15))
-        
-        # Pontos Dinâmicos de Rastreio
-        dot_c, = ax_c.plot([], [], 'ro', markersize=6); dot_p, = ax_p.plot([], [], 'ro', markersize=6); dot_f, = ax_f.plot([], [], 'ro', markersize=6)
-        dot_aa_cp, = ax_aa_cp.plot([], [], 'ro', markersize=6); dot_aa_pp, = ax_aa_pp.plot([], [], 'ro', markersize=6)
-        dot_ca_cp, = ax_ca_cp.plot([], [], 'ro', markersize=6); dot_ca_pp, = ax_ca_pp.plot([], [], 'ro', markersize=6)
+        ax.set_xlim(self.box['x'])
+        ax.set_ylim(self.box['y'])
+        ax.set_zlim(self.box['z'])
+        ax.view_init(elev=20, azim=135)
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.set_title(self.nome_arq, fontsize=12)
 
         linhas = {}
 
         def update(i_frame):
-            if i_frame >= total_frames: 
-                return list(linhas.values()) + [ptr_cp_d, ptr_pp_d, ptr_cp_e, ptr_pp_e, t_cp_d, t_pp_d, t_cp_e, t_pp_e, dot_c, dot_p, dot_f, dot_aa_cp, dot_aa_pp, dot_ca_cp, dot_ca_pp]
-
+            # Obtém os segmentos detectados apenas para o frame atual
             seg = self.montar_frame(i_frame)
-            for k in list(linhas):
-                if k not in seg: linhas[k].remove(); del linhas[k]
             
+            # Limpa as linhas antigas que sumiram (caso haja oclusão de marcador)
+            for k in list(linhas):
+                if k not in seg:
+                    linhas[k].remove()
+                    del linhas[k]
+            
+            # Atualiza coordenadas ou cria as linhas do modelo
             for n, (p1, p2) in seg.items():
-                c = 'red' if 'D' in n or 'R' in n else 'blue'
-                if 'P_' in n or 'PL' in n or 'PR' in n: c = 'black'
+                c = 'red' if '_D' in n else ('blue' if '_E' in n else 'black')
                 
-                # INVERSÃO NO EIXO X
+                # INVERSÃO NO EIXO X: Garante que a marcha aconteça para a frente no box
                 x_plot = [-p1[0], -p2[0]] 
+                y_plot = [p1[1], p2[1]]
+                z_plot = [p1[2], p2[2]]
                 
                 if n in linhas:
-                    linhas[n].set_data(x_plot, [p1[1],p2[1]]); linhas[n].set_3d_properties([p1[2],p2[2]])
+                    linhas[n].set_data(x_plot, y_plot)
+                    linhas[n].set_3d_properties(z_plot)
                 else: 
-                    linhas[n], = ax.plot(x_plot, [p1[1],p2[1]], [p1[2],p2[2]], c=c, lw=1.5)
+                    linhas[n], = ax.plot(x_plot, y_plot, z_plot, c=c, lw=2.5)
 
-            # Bússolas dinâmicas: seguras contra out of range no i_frame+1
-            if i_frame < total_frames - 1:
-                p_prox, p_curr = self.proc.segmentos_df.iloc[i_frame+1], self.proc.segmentos_df.iloc[i_frame]
-                pares = [('Coxa_D', 'Perna_D', ptr_cp_d, t_cp_d), ('Perna_D', 'Pe_D', ptr_pp_d, t_pp_d), 
-                         ('Coxa_E', 'Perna_E', ptr_cp_e, t_cp_e), ('Perna_E', 'Pe_E', ptr_pp_e, t_pp_e)]
-                for j_prox, j_dist, ptr, txt in pares:
-                    dx, dy = p_prox[j_prox] - p_curr[j_prox], p_prox[j_dist] - p_curr[j_dist]
-                    ang = np.degrees(np.arctan2(dy, dx)) % 360 if not (np.isnan(dx) or np.isnan(dy)) else np.nan
-                    if not np.isnan(ang):
-                        ptr.set_data([0, np.cos(np.radians(ang))], [0, np.sin(np.radians(ang))])
-                        label, cor = self._classificar_angulo(ang)
-                        txt.set_text(label); txt.set_color(cor)
-                        
-            # Rastreio Vector Coding seguro
-            dot_c.set_data([x_perc[i_frame]], [cx[i_frame]]); dot_p.set_data([x_perc[i_frame]], [pn[i_frame]]); dot_f.set_data([x_perc[i_frame]], [pe[i_frame]])
-            dot_aa_cp.set_data([cx[i_frame]], [pn[i_frame]]); dot_aa_pp.set_data([pn[i_frame]], [pe[i_frame]])
-            dot_ca_cp.set_data([x_perc[i_frame]], [ca_cp[i_frame]]); dot_ca_pp.set_data([x_perc[i_frame]], [ca_pp[i_frame]])
+            return list(linhas.values())
 
-            return list(linhas.values()) + [ptr_cp_d, ptr_pp_d, ptr_cp_e, ptr_pp_e, t_cp_d, t_pp_d, t_cp_e, t_pp_e, dot_c, dot_p, dot_f, dot_aa_cp, dot_aa_pp, dot_ca_cp, dot_ca_pp]
-
-        # Loop varrendo exata e inteiramente a captura bruta
-        ani = animation.FuncAnimation(fig, update, frames=range(0, total_frames, step), interval=50)
+        # Animação iterando sobre a lista bruta de inteiros
+        ani = animation.FuncAnimation(
+            fig, update, frames=range(0, total_frames, step), interval=50, blit=False
+        )
+        
         try:
             ani.save(caminho_final, writer='pillow', fps=fps_anim)
             return True, caminho_final
         except Exception as e: 
-            return False, str(e)
+            return False, f"Erro ao renderizar GIF: {str(e)}"
         finally: 
-            plt.close(fig); plt.close('all')
+            plt.close(fig)
+            plt.close('all')
 # =============================================================================
 # INTERFACE WEB STREAMLIT
 # =============================================================================
