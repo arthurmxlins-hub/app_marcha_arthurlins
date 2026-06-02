@@ -357,41 +357,95 @@ class GeradorVisual:
 
     def montar_frame(self, f):
         s = {}
-        # Substituição do 'or' pelo método seguro _get_primeiro_valido
+        
+        # =========================================================
+        # 1. PELVE (Modelo LACAF: RIAS, LIAS, RIPS, LIPS, RICT, LICT)
+        # =========================================================
         rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
         lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
         rips = self._get_primeiro_valido(['RIPS', 'RPSI'], f)
         lips = self._get_primeiro_valido(['LIPS', 'LPSI'], f)
+        rict = self._get_primeiro_valido(['RICT'], f)
+        lict = self._get_primeiro_valido(['LICT'], f)
         
-        quad_d = rias if rias is not None else rips
-        quad_e = lias if lias is not None else lips
+        # Desenho do Cinturão Pélvico 3D (Polígono Completo)
+        if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
+        if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
+        if rict is not None and rias is not None: s['Pelve_Dir_Ant'] = [rict, rias]
+        if rict is not None and rips is not None: s['Pelve_Dir_Post'] = [rict, rips]
+        if lict is not None and lias is not None: s['Pelve_Esq_Ant'] = [lict, lias]
+        if lict is not None and lips is not None: s['Pelve_Esq_Post'] = [lict, lips]
+        
+        # Âncora do Quadril (Aproximação visual usando a ASIS ou PSIS)
+        quad_d = rias if rias is not None else (rips if rips is not None else rict)
+        quad_e = lias if lias is not None else (lips if lips is not None else lict)
 
+        # =========================================================
+        # 2. JOELHOS (LACAF: Centro entre RLE e RME)
+        # =========================================================
         kd = self._mid_f('RLE', 'RME', f)
-        if kd is None: kd = self._get_primeiro_valido(['RLE', 'RKN'], f)
+        if kd is None: kd = self._get_primeiro_valido(['RLE', 'RME', 'RKN'], f)
         
         ke = self._mid_f('LLE', 'LME', f)
-        if ke is None: ke = self._get_primeiro_valido(['LLE', 'LKN'], f)
-        
+        if ke is None: ke = self._get_primeiro_valido(['LLE', 'LME', 'LKN'], f)
+
+        # =========================================================
+        # 3. COXAS (LACAF: Uso de RTHI e LTHI para rastreio volumétrico)
+        # =========================================================
+        rthi = self._get_primeiro_valido(['RTHI'], f)
+        lthi = self._get_primeiro_valido(['LTHI'], f)
+
+        if quad_d is not None and kd is not None:
+            if rthi is not None:
+                s['Coxa_D_Sup'] = [quad_d, rthi]
+                s['Coxa_D_Inf'] = [rthi, kd]
+            else:
+                s['Coxa_D'] = [quad_d, kd] # Fallback direto
+                
+        if quad_e is not None and ke is not None:
+            if lthi is not None:
+                s['Coxa_E_Sup'] = [quad_e, lthi]
+                s['Coxa_E_Inf'] = [lthi, ke]
+            else:
+                s['Coxa_E'] = [quad_e, ke] # Fallback direto
+
+        # =========================================================
+        # 4. TORNOZELOS E PERNAS (LACAF: Centro entre RML e RMM)
+        # =========================================================
         td = self._mid_f('RML', 'RMM', f)
-        if td is None: td = self._get_primeiro_valido(['RML', 'RANK'], f)
+        if td is None: td = self._get_primeiro_valido(['RML', 'RMM', 'RANK'], f)
         
         te = self._mid_f('LML', 'LMM', f)
-        if te is None: te = self._get_primeiro_valido(['LML', 'LANK'], f)
+        if te is None: te = self._get_primeiro_valido(['LML', 'LMM', 'LANK'], f)
 
-        if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
-        if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
         if kd is not None and td is not None: s['Perna_D'] = [kd, td]
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
-        h_d = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
-        h_e = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
-        t_d = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
-        t_e = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
+        # =========================================================
+        # 5. PÉS 3D COMPLETOS (LACAF: Calcanhar, 1º Meta e 5º Meta)
+        # =========================================================
+        rcal = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
+        lcal = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
+        rft1 = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
+        lft1 = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
+        rft5 = self._get_primeiro_valido(['RFT5'], f)
+        lft5 = self._get_primeiro_valido(['LFT5'], f)
 
-        if td is not None and h_d is not None: s['Pe_Calcanhar_D'] = [td, h_d]
-        if td is not None and t_d is not None: s['Pe_Ponta_D'] = [td, t_d]
-        if te is not None and h_e is not None: s['Pe_Calcanhar_E'] = [te, h_e]
-        if te is not None and t_e is not None: s['Pe_Ponta_E'] = [te, t_e]
+        # Construção da "Gaiola" Geométrica do Pé Direito
+        if td is not None and rcal is not None: s['Pe_Tornoz_Calc_D'] = [td, rcal]
+        if rcal is not None and rft1 is not None: s['Pe_Borda_Medial_D'] = [rcal, rft1]
+        if rcal is not None and rft5 is not None: s['Pe_Borda_Lateral_D'] = [rcal, rft5]
+        if rft1 is not None and rft5 is not None: s['Pe_Frente_D'] = [rft1, rft5]
+        if td is not None and rft1 is not None: s['Pe_Dorso_Medial_D'] = [td, rft1]
+        if td is not None and rft5 is not None: s['Pe_Dorso_Lateral_D'] = [td, rft5]
+
+        # Construção da "Gaiola" Geométrica do Pé Esquerdo
+        if te is not None and lcal is not None: s['Pe_Tornoz_Calc_E'] = [te, lcal]
+        if lcal is not None and lft1 is not None: s['Pe_Borda_Medial_E'] = [lcal, lft1]
+        if lcal is not None and lft5 is not None: s['Pe_Borda_Lateral_E'] = [lcal, lft5]
+        if lft1 is not None and lft5 is not None: s['Pe_Frente_E'] = [lft1, lft5]
+        if te is not None and lft1 is not None: s['Pe_Dorso_Medial_E'] = [te, lft1]
+        if te is not None and lft5 is not None: s['Pe_Dorso_Lateral_E'] = [te, lft5]
         
         return s
 
