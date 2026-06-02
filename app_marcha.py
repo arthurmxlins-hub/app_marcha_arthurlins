@@ -416,24 +416,17 @@ class GeradorVisual:
         pn_e = self.proc.segmentos_df['Perna_E'].values[:total_frames]
         pe_e = self.proc.segmentos_df['Pe_E'].values[:total_frames]
         
-        def calc_ca_filtrado(proximal, distal):
+        def calc_ca_bruto(proximal, distal):
             dx = -np.diff(proximal)
             dy = -np.diff(distal)
-            
-            # CÁLCULO ANGULAR BRUTO (Sem limiar de ruído)
             ca = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
             ca = np.append(ca, ca[-1] if len(ca) > 0 else np.nan)
-            
-            # FILTRO GRÁFICO (Wrap-Around)
-            ca_plot = ca.copy()
-            with np.errstate(invalid='ignore'): saltos = np.abs(np.diff(ca)) > 180
-            ca_plot[1:][saltos] = np.nan 
-            return ca, ca_plot
+            return ca
 
-        ca_cp_d, plot_cp_d = calc_ca_filtrado(cx_d, pn_d)
-        ca_pp_d, plot_pp_d = calc_ca_filtrado(pn_d, pe_d)
-        ca_cp_e, _ = calc_ca_filtrado(cx_e, pn_e)
-        ca_pp_e, _ = calc_ca_filtrado(pn_e, pe_e)
+        ca_cp_d = calc_ca_bruto(cx_d, pn_d)
+        ca_pp_d = calc_ca_bruto(pn_d, pe_d)
+        ca_cp_e = calc_ca_bruto(cx_e, pn_e)
+        ca_pp_e = calc_ca_bruto(pn_e, pe_e)
 
         largura_base = 8
         ratios = []
@@ -492,8 +485,8 @@ class GeradorVisual:
 
             if self.opt_ca:
                 gs_ca = gs_right[r_idx, 0].subgridspec(1, 2, wspace=0.3)
-                ax_ca_cp = fig.add_subplot(gs_ca[0, 0]); ax_ca_cp.plot(x_frames, plot_cp_d, 'k-', alpha=0.5); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title("Coupling Angle\nCoxa-Perna (°)", fontsize=9); ax_ca_cp.set_xticks([])
-                ax_ca_pp = fig.add_subplot(gs_ca[0, 1]); ax_ca_pp.plot(x_frames, plot_pp_d, 'k-', alpha=0.5); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title("Coupling Angle\nPerna-Pé (°)", fontsize=9); ax_ca_pp.set_xticks([])
+                ax_ca_cp = fig.add_subplot(gs_ca[0, 0]); ax_ca_cp.plot(x_frames, ca_cp_d, 'k-', alpha=0.5); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title("Coupling Angle\nCoxa-Perna (°)", fontsize=9); ax_ca_cp.set_xticks([])
+                ax_ca_pp = fig.add_subplot(gs_ca[0, 1]); ax_ca_pp.plot(x_frames, ca_pp_d, 'k-', alpha=0.5); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title("Coupling Angle\nPerna-Pé (°)", fontsize=9); ax_ca_pp.set_xticks([])
                 dots_direita['ca_cp'], = ax_ca_cp.plot([], [], 'ro', markersize=6)
                 dots_direita['ca_pp'], = ax_ca_pp.plot([], [], 'ro', markersize=6)
 
@@ -550,14 +543,6 @@ class GeradorVisual:
 # =============================================================================
 # FUNÇÕES GLOBAIS STREAMLIT DE FILTRAGEM E CÁLCULO
 # =============================================================================
-def limpar_wrap_around(curva_array):
-    """ Filtro gráfico: Injeta NaN se houver um salto > 180° para evitar linhas verticais """
-    if len(curva_array) == 0: return curva_array
-    plot_arr = np.array(curva_array, dtype=float)
-    with np.errstate(invalid='ignore'):
-        saltos = np.abs(np.diff(plot_arr)) > 180
-    plot_arr[1:][saltos] = np.nan
-    return plot_arr
 
 def calcular_ca_serie(prox_raw, dist_raw, p_obj, hss, tos=None):
     """ Calcula Vector Coding normalizado (Cálculo Angular Bruto) """
@@ -693,117 +678,18 @@ if st.session_state.processadores:
                 dados_curvas[grp]['CA_Seg'][f"Coxa_Perna_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Coxa_{lado}"].values, p.segmentos_df[f"Perna_{lado}"].values, p, hss, tos))
                 dados_curvas[grp]['CA_Seg'][f"Perna_Pe_{lado}"].extend(calcular_ca_serie(p.segmentos_df[f"Perna_{lado}"].values, p.segmentos_df[f"Pe_{lado}"].values, p, hss, tos))
 
-    tab1, tab2, tab_paper, tab_aa, tab_ca, tab_freq, tab_anim, tab_est = st.tabs([
-        "📊 Tabela", "📈 Cinemática", "📄 Plot Paper (A-G)", "🔄 Angle-Angle", "📈 Coupling Angle", 
-        "📊 Freq. Coordenação", "🎥 Animações 3D", "📦 Estatística"
+    tab_cin, tab_aa, tab_ca, tab_paper, tab_freq, tab_est, tab_anim, tab_tab = st.tabs([
+        "📈 Cinemática", 
+        "🔄 Angle-Angle", 
+        "📈 Coupling Angle", 
+        "📄 Plot Paper (Controle)", 
+        "📊 Freq. Coordenação", 
+        "📦 Espaço-Temporal", 
+        "🎥 Animações 3D",
+        "📊 Tabela Completa"
     ])
 
-    with tab1:
-        st.subheader("📊 Tabela de Dados Agrupados (Unilateral Completa)")
-        dados_tabela = []
-        for p in st.session_state.processadores:
-            try:
-                linha = {
-                    "ID_Paciente": p.id_paciente, "Grupo": p.grupo, "Velocidade (m/s)": getattr(p, 'velocidade_media', np.nan),
-                    "Apoio DIR (%)": p.fases_marcha.get('D', {}).get('Apoio', np.nan), "Apoio ESQ (%)": p.fases_marcha.get('E', {}).get('Apoio', np.nan),
-                    "Clearance DIR (mm)": p.foot_clearance.get('D', np.nan), "Clearance ESQ (mm)": p.foot_clearance.get('E', np.nan),
-                    "Passo DIR (mm)": p.comprimento_passo.get('D', np.nan), "Passo ESQ (mm)": p.comprimento_passo.get('E', np.nan),
-                    "Passo DIR (% Altura)": p.passo_norm.get('D', np.nan) if hasattr(p, 'passo_norm') else np.nan,
-                    "Passo ESQ (% Altura)": p.passo_norm.get('E', np.nan) if hasattr(p, 'passo_norm') else np.nan,
-                }
-                stats = p.obter_stats()
-                if stats:
-                    for art in ['Quad_D', 'Quad_E', 'Joel_D', 'Joel_E', 'Torn_D', 'Torn_E']:
-                        linha[f"{art} Máx (°)"] = stats.get(art, {}).get('max', np.nan)
-                        linha[f"{art} Mín (°)"] = stats.get(art, {}).get('min', np.nan)
-
-                pares_coord_tab1 = [
-                    ('Artic_QJ_DIR', 'Quad_Joel_D', 'angulos_df'), ('Artic_QJ_ESQ', 'Quad_Joel_E', 'angulos_df'),
-                    ('Artic_JT_DIR', 'Joel_Torn_D', 'angulos_df'), ('Artic_JT_ESQ', 'Joel_Torn_E', 'angulos_df'),
-                    ('Segm_CP_DIR', 'Coxa_Perna_D', 'segmentos_df'), ('Segm_CP_ESQ', 'Coxa_Perna_E', 'segmentos_df'),
-                    ('Segm_PP_DIR', 'Perna_Pe_D', 'segmentos_df'), ('Segm_PP_ESQ', 'Perna_Pe_E', 'segmentos_df')
-                ]
-                padroes = ['Proximal', 'EmFase', 'Distal', 'AntiFase']
-
-                for par_label, par_key, nome_df in pares_coord_tab1:
-                    try:
-                        prox_name, dist_name, lado = par_key.split('_')[0], par_key.split('_')[1], par_key.split('_')[2]
-                        hss = p.eventos[lado]['HS']
-                        tos = p.eventos[lado]['TO']
-                        df_obj = getattr(p, nome_df)
-                        
-                        if len(hss) > 1:
-                            c_prox = p.extrair_ciclos_normalizados(df_obj[f"{prox_name}_{lado}"].values, hss, tos)
-                            c_dist = p.extrair_ciclos_normalizados(df_obj[f"{dist_name}_{lado}"].values, hss, tos)
-                            if len(c_prox) > 0 and len(c_dist) > 0:
-                                arr_p, arr_d = np.array(c_prox), np.array(c_dist)
-                                delta_p, delta_d = np.diff(arr_p, axis=1), np.diff(arr_d, axis=1)
-                                gamma_rad = np.arctan2(-delta_d, -delta_p)
-                                gamma_deg = (np.degrees(gamma_rad) + 360) % 360
-                                
-                                x_m, y_m = np.nanmean(np.cos(gamma_rad), axis=0), np.nanmean(np.sin(gamma_rad), axis=0)
-                                r = np.clip(np.sqrt(x_m**2 + y_m**2), 0, 1)
-                                linha[f"CAV {par_label} (°)"] = np.mean(np.sqrt(2 * (1 - r)) * (180 / np.pi))
-                                padroes_idx = np.digitize(gamma_deg, [0, 45, 135, 225, 315, 360])
-                                padroes_idx[padroes_idx == 5] = 1
-                                linha[f"Transições {par_label}"] = np.mean(np.sum(np.diff(padroes_idx, axis=1) != 0, axis=1))
-                            else: linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
-                        else: linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
-
-                        serie = p.coord_vetorial_series.get(par_key, [])
-                        pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
-                        idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
-                        
-                        fatia_apoio = serie[0:idx_apoio] if len(serie) >= idx_apoio else []
-                        fatia_balanco = serie[idx_apoio:] if len(serie) > idx_apoio else []
-
-                        for padrao in padroes:
-                            linha[f"APOIO {par_label} - {padrao} (%)"] = (fatia_apoio.count(padrao) / len(fatia_apoio)) * 100 if len(fatia_apoio) > 0 else np.nan
-                            linha[f"BALANÇO {par_label} - {padrao} (%)"] = (fatia_balanco.count(padrao) / len(fatia_balanco)) * 100 if len(fatia_balanco) > 0 else np.nan
-                    except Exception: linha[f"CAV {par_label} (°)"] = np.nan; linha[f"Transições {par_label}"] = np.nan
-                dados_tabela.append(linha)
-            except Exception: continue
-                
-        if dados_tabela:
-            df_bruto = pd.DataFrame(dados_tabela)
-            cols_num = df_bruto.select_dtypes(include=[np.number]).columns.tolist()
-            df_agrupado_pacientes = df_bruto.groupby(['Grupo', 'ID_Paciente'])[cols_num].mean().reset_index().round(2).replace(np.nan, "")
-            st.dataframe(df_agrupado_pacientes, use_container_width=True, height=400)
-            csv1 = df_agrupado_pacientes.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-            st.download_button("📥 Baixar Tabela Unilateral", data=csv1, file_name="estatistica_unilateral.csv", mime="text/csv", type="primary")
-
-            st.markdown("---")
-            st.subheader("📊 Tabela de Médias Bilaterais (Espaço-Temporal e Coordenação Segmentar)")
-            df_bilat = pd.DataFrame()
-            
-            df_bilat['Grupo'] = df_bruto['Grupo']
-            df_bilat['ID_Paciente'] = df_bruto['ID_Paciente']
-            df_bilat['Velocidade (m/s)'] = df_bruto['Velocidade (m/s)']
-            df_bilat['Apoio Bilat (%)'] = df_bruto[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
-            df_bilat['Clearance Bilat (mm)'] = df_bruto[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
-            df_bilat['Passo Bilat (mm)'] = df_bruto[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
-            
-            if 'Passo DIR (% Altura)' in df_bruto.columns:
-                df_bilat['Passo Norm Bilat (%)'] = df_bruto[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
-            
-            df_bilat['CAV Coxa-Perna Bilat (°)'] = df_bruto[['CAV Segm_CP_DIR (°)', 'CAV Segm_CP_ESQ (°)']].mean(axis=1)
-            df_bilat['Transições Coxa-Perna Bilat'] = df_bruto[['Transições Segm_CP_DIR', 'Transições Segm_CP_ESQ']].mean(axis=1)
-            for padrao in padroes: df_bilat[f'Apoio CP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_CP_DIR - {padrao} (%)', f'APOIO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
-            for padrao in padroes: df_bilat[f'Balanço CP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_CP_DIR - {padrao} (%)', f'BALANÇO Segm_CP_ESQ - {padrao} (%)']].mean(axis=1)
-
-            df_bilat['CAV Perna-Pé Bilat (°)'] = df_bruto[['CAV Segm_PP_DIR (°)', 'CAV Segm_PP_ESQ (°)']].mean(axis=1)
-            df_bilat['Transições Perna-Pé Bilat'] = df_bruto[['Transições Segm_PP_DIR', 'Transições Segm_PP_ESQ']].mean(axis=1)
-            for padrao in padroes: df_bilat[f'Apoio PP Bilat - {padrao} (%)'] = df_bruto[[f'APOIO Segm_PP_DIR - {padrao} (%)', f'APOIO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
-            for padrao in padroes: df_bilat[f'Balanço PP Bilat - {padrao} (%)'] = df_bruto[[f'BALANÇO Segm_PP_DIR - {padrao} (%)', f'BALANÇO Segm_PP_ESQ - {padrao} (%)']].mean(axis=1)
-
-            cols_num_b = df_bilat.select_dtypes(include=[np.number]).columns.tolist()
-            df_bilat_agrupado = df_bilat.groupby(['Grupo', 'ID_Paciente'])[cols_num_b].mean().reset_index().round(2).replace(np.nan, "")
-            
-            st.dataframe(df_bilat_agrupado, use_container_width=True, height=400)
-            csv2 = df_bilat_agrupado.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-            st.download_button("📥 Baixar Tabela Bilateral (Segmentar)", data=csv2, file_name="estatistica_bilateral_segmentar.csv", mime="text/csv", type="secondary")
-
-    with tab2:
+    with tab_cin:
         st.subheader("📈 Curvas Cinemáticas Normalizadas (0-100% do Ciclo)")
         x_axis_perc = np.linspace(0, 100, 101)
         sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs(["🟢 Normativo (Controle)", "⚖️ Comparação Articular", "⚖️ Comparação Segmentar", "🔍 Curvas Individuais"])
@@ -876,62 +762,14 @@ if st.session_state.processadores:
                         if ciclos: ax.plot(x_axis_perc, np.mean(ciclos, axis=0), color=cor, linestyle=ls, lw=lw); ax.axhline(0, color='black', lw=0.8)
                     plt.tight_layout(); st.pyplot(fig_ind); plt.close(fig_ind)
 
-    with tab_paper:
-        st.subheader("📄 Relatório Paper: Plotagem Normalizada de Vector Coding (A-G)")
-        if len(st.session_state.processadores) > 0:
-            p_nomes = [p.nome_arq for p in st.session_state.processadores]
-            p_selecionado = st.selectbox("Selecione o Arquivo a Analisar:", p_nomes)
-            proc = next(p for p in st.session_state.processadores if p.nome_arq == p_selecionado)
-            lado_p = st.radio("Selecione o Lado Dominante para o Gráfico:", ["Direito (D)", "Esquerdo (E)"])
-            l = 'D' if 'Direito' in lado_p else 'E'
-
-            if len(proc.eventos[l]['HS']) >= 2:
-                hss = proc.eventos[l]['HS']
-                tos = proc.eventos[l]['TO']
-                
-                coxa_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Coxa_{l}'].values, hss, tos)
-                perna_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Perna_{l}'].values, hss, tos)
-                pe_list = proc.extrair_ciclos_normalizados(proc.segmentos_df[f'Pe_{l}'].values, hss, tos)
-
-                if coxa_list and perna_list and pe_list:
-                    coxa, perna, pe = coxa_list[0], perna_list[0], pe_list[0]
-                    x_perc = np.linspace(0, 100, 101)
-
-                    ca_cp = np.mod(np.degrees(np.arctan2(-np.diff(perna), -np.diff(coxa))), 360)
-                    ca_cp = np.append(ca_cp, ca_cp[-1])
-                    ca_pp = np.mod(np.degrees(np.arctan2(-np.diff(pe), -np.diff(perna))), 360)
-                    ca_pp = np.append(ca_pp, ca_pp[-1])
-
-                    fig_paper = plt.figure(figsize=(12, 12))
-                    axA = plt.subplot2grid((3, 6), (0, 0), colspan=2); axB = plt.subplot2grid((3, 6), (0, 2), colspan=2); axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
-                    
-                    axA.plot(x_perc, coxa, 'k-', lw=1.2); axA.set_title('A', loc='left', fontweight='bold'); axA.set_xlabel('% Cycle'); axA.set_ylabel('Thigh angular rotation (°)')
-                    axB.plot(x_perc, perna, 'k-', lw=1.2); axB.set_title('B', loc='left', fontweight='bold'); axB.set_xlabel('% Cycle'); axB.set_ylabel('Shank angular rotation (°)')
-                    axC.plot(x_perc, pe, 'k-', lw=1.2); axC.set_title('C', loc='left', fontweight='bold'); axC.set_xlabel('% Cycle'); axC.set_ylabel('Foot angular rotation (°)')
-
-                    axD = plt.subplot2grid((3, 6), (1, 0), colspan=3); axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
-                    axD.plot(coxa, perna, 'k-', lw=1.2); axD.set_title('D', loc='left', fontweight='bold'); axD.set_xlabel('Thigh (°)'); axD.set_ylabel('Shank (°)')
-                    axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
-                    axE.plot(perna, pe, 'k-', lw=1.2); axE.set_title('E', loc='left', fontweight='bold'); axE.set_xlabel('Shank (°)'); axE.set_ylabel('Foot (°)')
-                    axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
-
-                    axF = plt.subplot2grid((3, 6), (2, 0), colspan=3); axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
-                    
-                    axF.plot(x_perc, limpar_wrap_around(ca_cp), 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('% Cycle'); axF.set_ylabel('Thigh-shank coupling angle (°)')
-                    axF.set_ylim(0, 360); axF.set_yticks([0, 180, 360])
-                    
-                    axG.plot(x_perc, limpar_wrap_around(ca_pp), 'k-', lw=1.2); axG.set_title('G', loc='left', fontweight='bold'); axG.set_xlabel('% Cycle'); axG.set_ylabel('Shank-foot coupling angle (°)')
-                    axG.set_ylim(0, 360); axG.set_yticks([0, 180, 360])
-
-                    plt.tight_layout(); st.pyplot(fig_paper); plt.close(fig_paper)
-                else: st.warning("Dados curtos demais para processar este lado.")
-            else: st.warning("Sem dados suficientes para isolar um ciclo.")
-
     with tab_aa:
-        st.subheader("🔄 Diagramas Angle-Angle")
-        sub_aa1, sub_aa2, sub_aa3, sub_aa4 = st.tabs(["🟢 Padrão Normativo", "⚖️ Comp. Articular", "⚖️ Comp. Segmentar", "🔍 Indiv."])
+        st.subheader("🔄 Diagramas Angle-Angle (Ciclogramas Espaciais)")
+        st.markdown("Padrão visual adaptado para artigos científicos. A marca preta indica o Contato Inicial (0%) e o cruzamento das linhas orienta o centro (0°).")
+        
+        sub_aa1, sub_aa2, sub_aa3, sub_aa4 = st.tabs(["🟢 Padrão Normativo (Controle)", "⚖️ Comparação Articular", "⚖️ Comparação Segmentar", "🔍 Curvas Individuais por Lado"])
 
         with sub_aa1:
+            st.markdown("<h5 style='text-align:center;'>Média Bilateral Isolada - Grupo Controle</h5>", unsafe_allow_html=True)
             grupo_controle = [g for g in grupos_estudo if 'control' in g.lower()]
             if grupo_controle:
                 grp = grupo_controle[0]
@@ -946,8 +784,11 @@ if st.session_state.processadores:
                         ax.plot(x_mean, y_mean, color='black', lw=1.5); ax.scatter(x_mean[0], y_mean[0], color='black', s=40, zorder=5)
                     ax.set_xlabel(label_x, fontsize=10); ax.set_ylabel(label_y, fontsize=10); ax.axhline(0, color='black', lw=0.5); ax.axvline(0, color='black', lw=0.5)
                 plt.tight_layout(); st.pyplot(fig_aa_ctrl); plt.close(fig_aa_ctrl)
+            else:
+                st.info("⚠️ Nenhum grupo com o termo 'Controle' foi detectado.")
 
         with sub_aa2:
+            st.markdown("<h5 style='text-align:center;'>Comparativo Articular Bilateral</h5>", unsafe_allow_html=True)
             fig_aa_art, axs_aa_art = plt.subplots(1, 2, figsize=(10, 5))
             pares_comp_art = [(axs_aa_art[0], 'Quad', 'Joel', 'Hip (°)', 'Knee (°)'), (axs_aa_art[1], 'Joel', 'Torn', 'Knee (°)', 'Ankle (°)')]
             for ax, x_k, y_k, label_x, label_y in pares_comp_art:
@@ -962,6 +803,7 @@ if st.session_state.processadores:
             plt.tight_layout(); st.pyplot(fig_aa_art); plt.close(fig_aa_art)
 
         with sub_aa3:
+            st.markdown("<h5 style='text-align:center;'>Comparativo Segmentar Bilateral</h5>", unsafe_allow_html=True)
             fig_aa_seg, axs_aa_seg = plt.subplots(1, 2, figsize=(10, 5))
             pares_comp_seg = [(axs_aa_seg[0], 'Coxa', 'Perna', 'Thigh (°)', 'Shank (°)'), (axs_aa_seg[1], 'Perna', 'Pe', 'Shank (°)', 'Foot (°)')]
             for ax, x_k, y_k, label_x, label_y in pares_comp_seg:
@@ -979,11 +821,12 @@ if st.session_state.processadores:
             cols_ind_aa = st.columns(len(grupos_estudo))
             for idx, grp in enumerate(grupos_estudo):
                 with cols_ind_aa[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
                     fig_ind_aa, axs_ind_aa = plt.subplots(4, 2, figsize=(7, 14))
-                    mapeamento = [(axs_ind_aa[0,0], 'Quad_D', 'Joel_D', 'Art', 'Hip', 'Knee'), (axs_ind_aa[0,1], 'Quad_E', 'Joel_E', 'Art', 'Hip', 'Knee'),
-                                  (axs_ind_aa[1,0], 'Joel_D', 'Torn_D', 'Art', 'Knee', 'Ank'), (axs_ind_aa[1,1], 'Joel_E', 'Torn_E', 'Art', 'Knee', 'Ank'),
-                                  (axs_ind_aa[2,0], 'Coxa_D', 'Perna_D', 'Seg', 'Thigh', 'Shank'), (axs_ind_aa[2,1], 'Coxa_E', 'Perna_E', 'Seg', 'Thigh', 'Shank'),
-                                  (axs_ind_aa[3,0], 'Perna_D', 'Pe_D', 'Seg', 'Shank', 'Foot'), (axs_ind_aa[3,1], 'Perna_E', 'Pe_E', 'Seg', 'Shank', 'Foot')]
+                    mapeamento = [(axs_ind_aa[0,0], 'Quad_D', 'Joel_D', 'Art', 'Hip(°)', 'Knee(°) (D)'), (axs_ind_aa[0,1], 'Quad_E', 'Joel_E', 'Art', 'Hip(°)', 'Knee(°) (E)'),
+                                  (axs_ind_aa[1,0], 'Joel_D', 'Torn_D', 'Art', 'Knee(°)', 'Ankle(°) (D)'), (axs_ind_aa[1,1], 'Joel_E', 'Torn_E', 'Art', 'Knee(°)', 'Ankle(°) (E)'),
+                                  (axs_ind_aa[2,0], 'Coxa_D', 'Perna_D', 'Seg', 'Thigh(°)', 'Shank(°) (D)'), (axs_ind_aa[2,1], 'Coxa_E', 'Perna_E', 'Seg', 'Thigh(°)', 'Shank(°) (E)'),
+                                  (axs_ind_aa[3,0], 'Perna_D', 'Pe_D', 'Seg', 'Shank(°)', 'Foot(°) (D)'), (axs_ind_aa[3,1], 'Perna_E', 'Pe_E', 'Seg', 'Shank(°)', 'Foot(°) (E)')]
                     cor, ls, lw = obter_estilo(grp, idx)
                     for ax, x_k, y_k, tipo, lx, ly in mapeamento:
                         x_cics, y_cics = dados_curvas[grp][tipo][x_k], dados_curvas[grp][tipo][y_k]
@@ -1012,7 +855,7 @@ if st.session_state.processadores:
                     ax.set_ylabel(titulo); ax.set_xlabel("% Cycle")
                     ax.set_ylim(0, 360); ax.set_yticks([0, 180, 360])
                     ciclos = dados_curvas[grp_ctrl][tipo][f"{par}_D"] + dados_curvas[grp_ctrl][tipo][f"{par}_E"]
-                    if ciclos: ax.plot(x_tempo, limpar_wrap_around(media_circular(ciclos)), color='black', lw=1.5)
+                    if ciclos: ax.plot(x_tempo, media_circular(ciclos), color='black', lw=1.5)
                 plt.tight_layout(); st.pyplot(fig_ca_ctrl); plt.close(fig_ca_ctrl)
 
         with sub_ca2:
@@ -1026,7 +869,7 @@ if st.session_state.processadores:
                     ciclos = dados_curvas[grp]['CA_Art'][f"{par}_D"] + dados_curvas[grp]['CA_Art'][f"{par}_E"]
                     if ciclos:
                         cor, ls, lw = obter_estilo(grp, idx)
-                        ax.plot(x_tempo, limpar_wrap_around(media_circular(ciclos)), label=grp, color=cor, linestyle=ls, lw=lw)
+                        ax.plot(x_tempo, media_circular(ciclos), label=grp, color=cor, linestyle=ls, lw=lw)
                 if idx_par == 1: ax.legend(loc='best', frameon=False)
             plt.tight_layout(); st.pyplot(fig_ca_art); plt.close(fig_ca_art)
 
@@ -1041,7 +884,7 @@ if st.session_state.processadores:
                     ciclos = dados_curvas[grp]['CA_Seg'][f"{par}_D"] + dados_curvas[grp]['CA_Seg'][f"{par}_E"]
                     if ciclos:
                         cor, ls, lw = obter_estilo(grp, idx)
-                        ax.plot(x_tempo, limpar_wrap_around(media_circular(ciclos)), label=grp, color=cor, linestyle=ls, lw=lw)
+                        ax.plot(x_tempo, media_circular(ciclos), label=grp, color=cor, linestyle=ls, lw=lw)
                 if idx_par == 1: ax.legend(loc='best', frameon=False)
             plt.tight_layout(); st.pyplot(fig_ca_seg); plt.close(fig_ca_seg)
 
@@ -1049,6 +892,7 @@ if st.session_state.processadores:
             cols_sep_ca = st.columns(len(grupos_estudo))
             for idx, grp in enumerate(grupos_estudo):
                 with cols_sep_ca[idx]:
+                    st.markdown(f"<h5 style='text-align:center;'>Grupo: {grp}</h5>", unsafe_allow_html=True)
                     x_tempo = np.linspace(0, 100, 101)
                     fig_ind_ca, axs_ind_ca = plt.subplots(4, 2, figsize=(7, 12), sharex=True)
                     map_ca_ind = [('Quad_Joel_D', 0, 0, 'CA_Art'), ('Quad_Joel_E', 0, 1, 'CA_Art'), ('Joel_Torn_D', 1, 0, 'CA_Art'), ('Joel_Torn_E', 1, 1, 'CA_Art'),
@@ -1060,8 +904,77 @@ if st.session_state.processadores:
                         if row == 3: ax.set_xlabel("% Cycle", fontsize=9)
                         ax.set_ylim(0, 360); ax.set_yticks([0, 180, 360])
                         ciclos = dados_curvas[grp][tipo][chave]
-                        if ciclos: ax.plot(x_tempo, limpar_wrap_around(media_circular(ciclos)), color=cor, linestyle=ls, lw=lw)
+                        if ciclos: ax.plot(x_tempo, media_circular(ciclos), color=cor, linestyle=ls, lw=lw)
                     plt.tight_layout(); st.pyplot(fig_ind_ca); plt.close(fig_ind_ca)
+
+    with tab_paper:
+        st.subheader("📄 Plot Paper: Padrão de Normalidade (Grupo Controle)")
+        st.info("Visão completa (Cinemática, Angle-Angle e Coupling Angle) baseada na média bilateral do grupo Controle.")
+        
+        grupo_controle = [g for g in grupos_estudo if 'control' in g.lower()]
+        
+        if not grupo_controle:
+            st.warning("⚠️ Nenhum grupo com o termo 'Controle' foi detectado nos arquivos processados.")
+        else:
+            grp_ctrl = grupo_controle[0]
+            sub_paper_seg, sub_paper_art = st.tabs(["📐 Segmentar", "📍 Articular"])
+            x_perc = np.linspace(0, 100, 101)
+            
+            with sub_paper_seg:
+                fig_pseg = plt.figure(figsize=(14, 12))
+                axA = plt.subplot2grid((3, 6), (0, 0), colspan=2); axB = plt.subplot2grid((3, 6), (0, 2), colspan=2); axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
+                axD = plt.subplot2grid((3, 6), (1, 0), colspan=3); axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
+                axF = plt.subplot2grid((3, 6), (2, 0), colspan=3); axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
+                
+                cics_coxa = dados_curvas[grp_ctrl]['Seg']['Coxa_D'] + dados_curvas[grp_ctrl]['Seg']['Coxa_E']
+                cics_perna = dados_curvas[grp_ctrl]['Seg']['Perna_D'] + dados_curvas[grp_ctrl]['Seg']['Perna_E']
+                cics_pe = dados_curvas[grp_ctrl]['Seg']['Pe_D'] + dados_curvas[grp_ctrl]['Seg']['Pe_E']
+                
+                if cics_coxa and cics_perna and cics_pe:
+                    coxa = np.mean(cics_coxa, axis=0); perna = np.mean(cics_perna, axis=0); pe = np.mean(cics_pe, axis=0)
+                    
+                    axA.plot(x_perc, coxa, 'k-', lw=1.5); axA.set_title('Thigh angular rotation (°)', fontweight='bold'); axA.set_xlabel('% Cycle'); axA.axhline(0, color='black', lw=0.5)
+                    axB.plot(x_perc, perna, 'k-', lw=1.5); axB.set_title('Shank angular rotation (°)', fontweight='bold'); axB.set_xlabel('% Cycle'); axB.axhline(0, color='black', lw=0.5)
+                    axC.plot(x_perc, pe, 'k-', lw=1.5); axC.set_title('Foot angular rotation (°)', fontweight='bold'); axC.set_xlabel('% Cycle'); axC.axhline(0, color='black', lw=0.5)
+                    
+                    axD.plot(coxa, perna, 'k-', lw=1.5); axD.scatter(coxa[0], perna[0], color='black', s=40, zorder=5); axD.set_title('Thigh-Shank Angle-Angle', fontweight='bold'); axD.set_xlabel('Thigh (°)'); axD.set_ylabel('Shank (°)'); axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
+                    axE.plot(perna, pe, 'k-', lw=1.5); axE.scatter(perna[0], pe[0], color='black', s=40, zorder=5); axE.set_title('Shank-Foot Angle-Angle', fontweight='bold'); axE.set_xlabel('Shank (°)'); axE.set_ylabel('Foot (°)'); axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
+                    
+                    ca_cp = media_circular(dados_curvas[grp_ctrl]['CA_Seg']['Coxa_Perna_D'] + dados_curvas[grp_ctrl]['CA_Seg']['Coxa_Perna_E'])
+                    ca_pp = media_circular(dados_curvas[grp_ctrl]['CA_Seg']['Perna_Pe_D'] + dados_curvas[grp_ctrl]['CA_Seg']['Perna_Pe_E'])
+                    
+                    axF.plot(x_perc, ca_cp, 'k-', lw=1.5); axF.set_title('Thigh-shank coupling angle (°)', fontweight='bold'); axF.set_xlabel('% Cycle'); axF.set_ylim(0, 360); axF.set_yticks([0, 180, 360])
+                    axG.plot(x_perc, ca_pp, 'k-', lw=1.5); axG.set_title('Shank-foot coupling angle (°)', fontweight='bold'); axG.set_xlabel('% Cycle'); axG.set_ylim(0, 360); axG.set_yticks([0, 180, 360])
+                    
+                plt.tight_layout(); st.pyplot(fig_pseg); plt.close(fig_pseg)
+
+            with sub_paper_art:
+                fig_part = plt.figure(figsize=(14, 12))
+                axA = plt.subplot2grid((3, 6), (0, 0), colspan=2); axB = plt.subplot2grid((3, 6), (0, 2), colspan=2); axC = plt.subplot2grid((3, 6), (0, 4), colspan=2)
+                axD = plt.subplot2grid((3, 6), (1, 0), colspan=3); axE = plt.subplot2grid((3, 6), (1, 3), colspan=3)
+                axF = plt.subplot2grid((3, 6), (2, 0), colspan=3); axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
+                
+                cics_quad = dados_curvas[grp_ctrl]['Art']['Quad_D'] + dados_curvas[grp_ctrl]['Art']['Quad_E']
+                cics_joel = dados_curvas[grp_ctrl]['Art']['Joel_D'] + dados_curvas[grp_ctrl]['Art']['Joel_E']
+                cics_torn = dados_curvas[grp_ctrl]['Art']['Torn_D'] + dados_curvas[grp_ctrl]['Art']['Torn_E']
+                
+                if cics_quad and cics_joel and cics_torn:
+                    quad = np.mean(cics_quad, axis=0); joel = np.mean(cics_joel, axis=0); torn = np.mean(cics_torn, axis=0)
+                    
+                    axA.plot(x_perc, quad, 'k-', lw=1.5); axA.set_title('Hip angular rotation (°)', fontweight='bold'); axA.set_xlabel('% Cycle'); axA.axhline(0, color='black', lw=0.5)
+                    axB.plot(x_perc, joel, 'k-', lw=1.5); axB.set_title('Knee angular rotation (°)', fontweight='bold'); axB.set_xlabel('% Cycle'); axB.axhline(0, color='black', lw=0.5)
+                    axC.plot(x_perc, torn, 'k-', lw=1.5); axC.set_title('Ankle angular rotation (°)', fontweight='bold'); axC.set_xlabel('% Cycle'); axC.axhline(0, color='black', lw=0.5)
+                    
+                    axD.plot(quad, joel, 'k-', lw=1.5); axD.scatter(quad[0], joel[0], color='black', s=40, zorder=5); axD.set_title('Hip-Knee Angle-Angle', fontweight='bold'); axD.set_xlabel('Hip (°)'); axD.set_ylabel('Knee (°)'); axD.axhline(0, color='black', lw=0.5); axD.axvline(0, color='black', lw=0.5)
+                    axE.plot(joel, torn, 'k-', lw=1.5); axE.scatter(joel[0], torn[0], color='black', s=40, zorder=5); axE.set_title('Knee-Ankle Angle-Angle', fontweight='bold'); axE.set_xlabel('Knee (°)'); axE.set_ylabel('Ankle (°)'); axE.axhline(0, color='black', lw=0.5); axE.axvline(0, color='black', lw=0.5)
+                    
+                    ca_qj = media_circular(dados_curvas[grp_ctrl]['CA_Art']['Quad_Joel_D'] + dados_curvas[grp_ctrl]['CA_Art']['Quad_Joel_E'])
+                    ca_jt = media_circular(dados_curvas[grp_ctrl]['CA_Art']['Joel_Torn_D'] + dados_curvas[grp_ctrl]['CA_Art']['Joel_Torn_E'])
+                    
+                    axF.plot(x_perc, ca_qj, 'k-', lw=1.5); axF.set_title('Hip-knee coupling angle (°)', fontweight='bold'); axF.set_xlabel('% Cycle'); axF.set_ylim(0, 360); axF.set_yticks([0, 180, 360])
+                    axG.plot(x_perc, ca_jt, 'k-', lw=1.5); axG.set_title('Knee-ankle coupling angle (°)', fontweight='bold'); axG.set_xlabel('% Cycle'); axG.set_ylim(0, 360); axG.set_yticks([0, 180, 360])
+                    
+                plt.tight_layout(); st.pyplot(fig_part); plt.close(fig_part)
 
     with tab_freq:
         st.subheader("📊 Frequência de Coordenação Vetorial (Vector Coding)")
