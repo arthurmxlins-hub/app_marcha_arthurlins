@@ -354,81 +354,47 @@ class GeradorVisual:
         return None
 
     def montar_frame(self, f):
+        """ 
+        Visão Matemática (Raio-X do Processador):
+        Desenha EXATAMENTE os mesmos vetores usados em _calcular_angulos_segmentares()
+        """
         s = {}
         
-        # =========================================================
-        # 1. PELVE (AZUL)
-        # =========================================================
-        rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
-        lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
-        rips = self._get_primeiro_valido(['RIPS', 'RPSI'], f)
-        lips = self._get_primeiro_valido(['LIPS', 'LPSI'], f)
-        rict = self._get_primeiro_valido(['RICT'], f)
-        lict = self._get_primeiro_valido(['LICT'], f)
+        # 1. PONTOS DA MATEMÁTICA (Direito e Esquerdo)
+        # Quadril (Usa apenas o ASIS frontal, ignorando o restante da pelve)
+        h_d = self._get_primeiro_valido(['RIAS', 'RASI'], f)
+        h_e = self._get_primeiro_valido(['LIAS', 'LASI'], f)
         
-        if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
-        if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
-        if rict is not None and rias is not None: s['Pelve_Dir_Ant'] = [rict, rias]
-        if rict is not None and rips is not None: s['Pelve_Dir_Post'] = [rict, rips]
-        if lict is not None and lias is not None: s['Pelve_Esq_Ant'] = [lict, lias]
-        if lict is not None and lips is not None: s['Pelve_Esq_Post'] = [lict, lips]
+        # Joelho (Centro exato entre os epicôndilos)
+        k_d = self._mid_f('RLE', 'RME', f)
+        k_e = self._mid_f('LLE', 'LME', f)
         
-        quad_d = rias if rias is not None else (rips if rips is not None else rict)
-        quad_e = lias if lias is not None else (lips if lips is not None else lict)
-
-        # =========================================================
-        # 2. JOELHOS 
-        # =========================================================
-        kd = self._mid_f('RLE', 'RME', f)
-        if kd is None: kd = self._get_primeiro_valido(['RLE', 'RME', 'RKN'], f)
+        # Tornozelo (Centro exato entre os maléolos)
+        a_d = self._mid_f('RML', 'RMM', f)
+        a_e = self._mid_f('LML', 'LMM', f)
         
-        ke = self._mid_f('LLE', 'LME', f)
-        if ke is None: ke = self._get_primeiro_valido(['LLE', 'LME', 'LKN'], f)
+        # Pé (Calcâneo e 1º Metatarso estritos)
+        cal_d = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
+        p_d = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
+        cal_e = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
+        p_e = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
 
-        # =========================================================
-        # 3. COXAS DIRETAS (Enxutas)
-        # =========================================================
-        if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
-        if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
-
-        # =========================================================
-        # 4. TORNOZELOS E PERNAS
-        # =========================================================
-        td = self._mid_f('RML', 'RMM', f)
-        if td is None: td = self._get_primeiro_valido(['RML', 'RMM', 'RANK'], f)
+        # 2. MONTAGEM DOS VETORES ESTRITOS (Como a cinemática os vê)
+        # Segmento da Coxa
+        if h_d is not None and k_d is not None: s['Coxa_D'] = [h_d, k_d]
+        if h_e is not None and k_e is not None: s['Coxa_E'] = [h_e, k_e]
         
-        te = self._mid_f('LML', 'LMM', f)
-        if te is None: te = self._get_primeiro_valido(['LML', 'LMM', 'LANK'], f)
-
-        if kd is not None and td is not None: s['Perna_D'] = [kd, td]
-        if ke is not None and te is not None: s['Perna_E'] = [ke, te]
-
-        # =========================================================
-        # 5. PÉS EM PIRÂMIDE (Base triangular fechada com o Tornozelo)
-        # =========================================================
-        rcal = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
-        lcal = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
-        rft1 = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
-        lft1 = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
-        rft5 = self._get_primeiro_valido(['RFT5'], f)
-        lft5 = self._get_primeiro_valido(['LFT5'], f)
-
-        # Pirâmide Direita
-        if td is not None and rcal is not None: s['Pe_Tornoz_Calc_D'] = [td, rcal]
-        if td is not None and rft1 is not None: s['Pe_Tornoz_M1_D'] = [td, rft1]
-        if td is not None and rft5 is not None: s['Pe_Tornoz_M5_D'] = [td, rft5]
-        if rcal is not None and rft1 is not None: s['Pe_Sola_Medial_D'] = [rcal, rft1]
-        if rcal is not None and rft5 is not None: s['Pe_Sola_Lateral_D'] = [rcal, rft5]
-        if rft1 is not None and rft5 is not None: s['Pe_Sola_Frente_D'] = [rft1, rft5]
-
-        # Pirâmide Esquerda
-        if te is not None and lcal is not None: s['Pe_Tornoz_Calc_E'] = [te, lcal]
-        if te is not None and lft1 is not None: s['Pe_Tornoz_M1_E'] = [te, lft1]
-        if te is not None and lft5 is not None: s['Pe_Tornoz_M5_E'] = [te, lft5]
-        if lcal is not None and lft1 is not None: s['Pe_Sola_Medial_E'] = [lcal, lft1]
-        if lcal is not None and lft5 is not None: s['Pe_Sola_Lateral_E'] = [lcal, lft5]
-        if lft1 is not None and lft5 is not None: s['Pe_Sola_Frente_E'] = [lft1, lft5]
+        # Segmento da Perna
+        if k_d is not None and a_d is not None: s['Perna_D'] = [k_d, a_d]
+        if k_e is not None and a_e is not None: s['Perna_E'] = [k_e, a_e]
         
+        # Segmento do Pé (Vetor Único: Calcâneo -> Ponta do Pé)
+        if cal_d is not None and p_d is not None: s['Pe_D'] = [cal_d, p_d]
+        if cal_e is not None and p_e is not None: s['Pe_E'] = [cal_e, p_e]
+
+        # Linha Pélvica Frontal (apenas para conectar as pernas visualmente)
+        if h_d is not None and h_e is not None: s['Pelve_Virtual'] = [h_d, h_e]
+
         return s
 
     def _criar_bussola(self, ax, titulo):
@@ -549,10 +515,10 @@ class GeradorVisual:
                     if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
                 
                 for n, (p1, p2) in seg.items():
-                    # NOVO ESQUEMA DE CORES (Verde: Dir, Roxo: Esq, Azul: Pelve)
-                    if '_D' in n: c = 'green'
+                    # PRIORIDADE ABSOLUTA: Verifica 'Pelve' PRIMEIRO para não ser sobrescrito pelo lado (D/E)
+                    if 'Pelve' in n: c = 'blue'
+                    elif '_D' in n: c = 'green'
                     elif '_E' in n: c = 'purple'
-                    elif 'Pelve' in n: c = 'blue'
                     else: c = 'black'
                     
                     x_plot = [-p1[0], -p2[0]] # Inversão Horizontal no Plot
