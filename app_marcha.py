@@ -344,7 +344,7 @@ class GeradorVisual:
     
     def _mid_f(self, n1, n2, f):
         p1 = self._get_f(n1, f); p2 = self._get_f(n2, f)
-        if p1 is not None and p2 is not None: return (p1 + p2) / 2
+        if p1 is not None and p2 is not None: return (p1 + p2) / 2.0
         return p1 if p1 is not None else p2
 
     def montar_frame(self, f):
@@ -353,11 +353,6 @@ class GeradorVisual:
         lias = self._get_f('LIAS', f) or self._get_f('LASI', f)
         rips = self._get_f('RIPS', f) or self._get_f('RPSI', f)
         lips = self._get_f('LIPS', f) or self._get_f('LPSI', f)
-        
-        if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
-        if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
-        if rias is not None and rips is not None: s['Pelve_Dir'] = [rias, rips]
-        if lias is not None and lips is not None: s['Pelve_Esq'] = [lias, lips]
         
         quad_d = rias if rias is not None else rips
         quad_e = lias if lias is not None else lips
@@ -372,173 +367,180 @@ class GeradorVisual:
         if kd is not None and td is not None: s['Perna_D'] = [kd, td]
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
-        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f); h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
-        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f); t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
+        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f)
+        h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
+        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f)
+        t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
 
         if td is not None and h_d is not None: s['Pe_Calcanhar_D'] = [td, h_d]
         if td is not None and t_d is not None: s['Pe_Ponta_D'] = [td, t_d]
-        if h_d is not None and t_d is not None: s['Pe_Sola_D'] = [h_d, t_d]
         if te is not None and h_e is not None: s['Pe_Calcanhar_E'] = [te, h_e]
         if te is not None and t_e is not None: s['Pe_Ponta_E'] = [te, t_e]
-        if h_e is not None and t_e is not None: s['Pe_Sola_E'] = [h_e, t_e]
+        
         return s
 
-    def _desenhar_bussola(self, ax_c, titulo):
-        ax_c.set_xlim(-1.2, 1.2); ax_c.set_ylim(-1.4, 1.4); ax_c.axis('off'); ax_c.set_aspect('equal')
-        ax_c.text(0, 1.35, titulo, ha='center', va='center', fontsize=9, fontweight='bold')
-        txt = ax_c.text(0, -1.35, "-", ha='center', va='center', fontsize=10, fontweight='bold')
+    def _criar_bussola(self, ax, titulo):
+        ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.4, 1.4); ax.axis('off'); ax.set_aspect('equal')
+        ax.text(0, 1.35, titulo, ha='center', va='center', fontsize=9, fontweight='bold')
+        txt = ax.text(0, -1.35, "-", ha='center', va='center', fontsize=10, fontweight='bold')
         categorias = [((0, 22.5), '#e74c3c'), ((337.5, 360), '#e74c3c'), ((157.5, 202.5), '#e74c3c'),
                       ((22.5, 67.5), '#2ecc71'), ((202.5, 247.5), '#2ecc71'),
                       ((67.5, 112.5), '#3498db'), ((247.5, 292.5), '#3498db'),
                       ((112.5, 157.5), '#f1c40f'), ((292.5, 337.5), '#f1c40f')]
         for (t1, t2), cor in categorias: 
-            ax_c.add_patch(mpatches.Wedge((0,0), 1.0, t1, t2, facecolor=cor, alpha=0.35, edgecolor='white', lw=1))
-        ax_c.plot([0], [0], marker='o', color='black', markersize=4)
-        ptr, = ax_c.plot([], [], color='black', lw=2.5)
+            ax.add_patch(mpatches.Wedge((0,0), 1.0, t1, t2, facecolor=cor, alpha=0.35, edgecolor='white', lw=1))
+        ax.plot([0], [0], marker='o', color='black', markersize=4)
+        ptr, = ax.plot([], [], color='black', lw=2.5)
         return ptr, txt
 
-    def _classificar_angulo(self, angulo):
-        if np.isnan(angulo): return "-", "gray"
-        a = angulo % 360
-        if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): return "PROXIMAL", '#e74c3c'
-        elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): return "EM FASE", '#2ecc71'
-        elif (67.5 <= a < 112.5) or (247.5 <= a < 292.5): return "DISTAL", '#3498db'
-        else: return "ANTI-FASE", '#f1c40f'
-
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        total_frames = self.proc.n_frames
-        if total_frames < 2: return False, "Frames insuficientes."
-
-        cx_d = self.proc.segmentos_df['Coxa_D'].values[:total_frames]
-        pn_d = self.proc.segmentos_df['Perna_D'].values[:total_frames]
-        pe_d = self.proc.segmentos_df['Pe_D'].values[:total_frames]
-        cx_e = self.proc.segmentos_df['Coxa_E'].values[:total_frames]
-        pn_e = self.proc.segmentos_df['Perna_E'].values[:total_frames]
-        pe_e = self.proc.segmentos_df['Pe_E'].values[:total_frames]
-        
-        def calc_ca_bruto(proximal, distal):
-            dx = -np.diff(proximal)
-            dy = -np.diff(distal)
-            ca = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
-            ca = np.append(ca, ca[-1] if len(ca) > 0 else np.nan)
-            return ca
-
-        ca_cp_d = calc_ca_bruto(cx_d, pn_d)
-        ca_pp_d = calc_ca_bruto(pn_d, pe_d)
-        ca_cp_e = calc_ca_bruto(cx_e, pn_e)
-        ca_pp_e = calc_ca_bruto(pn_e, pe_e)
-
-        largura_base = 8
-        ratios = []
-        if self.opt_bussolas: ratios.append(1); largura_base += 3
-        ratios.append(2) 
-        
-        opcoes_direita = sum([self.opt_ang, self.opt_aa, self.opt_ca])
-        if opcoes_direita > 0: ratios.append(1.5); largura_base += 6
-
-        fig = plt.figure(figsize=(largura_base, 8))
-        gs_main = fig.add_gridspec(1, len(ratios), width_ratios=ratios)
-        idx_grid = 0
-        elementos_dinamicos = []
-
-        if self.opt_bussolas:
-            gs_left = gs_main[0, idx_grid].subgridspec(2, 2, hspace=0.1, wspace=0.1)
-            ax_cp_d = fig.add_subplot(gs_left[0, 0]); ax_cp_e = fig.add_subplot(gs_left[0, 1])
-            ax_pp_d = fig.add_subplot(gs_left[1, 0]); ax_pp_e = fig.add_subplot(gs_left[1, 1])
-            ptr_cp_d, txt_cp_d = self._desenhar_bussola(ax_cp_d, "Coxa-Perna\n(DIR)")
-            ptr_cp_e, txt_cp_e = self._desenhar_bussola(ax_cp_e, "Coxa-Perna\n(ESQ)")
-            ptr_pp_d, txt_pp_d = self._desenhar_bussola(ax_pp_d, "Perna-Pé\n(DIR)")
-            ptr_pp_e, txt_pp_e = self._desenhar_bussola(ax_pp_e, "Perna-Pé\n(ESQ)")
-            elementos_dinamicos.extend([ptr_cp_d, txt_cp_d, ptr_cp_e, txt_cp_e, ptr_pp_d, txt_pp_d, ptr_pp_e, txt_pp_e])
-            idx_grid += 1
-
-        ax_3d = fig.add_subplot(gs_main[0, idx_grid], projection='3d')
-        ax_3d.set_xlim(self.box['x']); ax_3d.set_ylim(self.box['y']); ax_3d.set_zlim(self.box['z'])
-        ax_3d.view_init(elev=20, azim=135); ax_3d.set_xlabel('X'); ax_3d.set_ylabel('Y'); ax_3d.set_zlabel('Z')
-        ax_3d.set_title(self.nome_arq, fontsize=12)
-        idx_grid += 1
-
-        x_frames = np.arange(total_frames)
-        dots_direita = {} 
-        
-        if opcoes_direita > 0:
-            gs_right = gs_main[0, idx_grid].subgridspec(opcoes_direita, 1, hspace=0.4)
-            r_idx = 0
-
-            if self.opt_ang:
-                gs_ang = gs_right[r_idx, 0].subgridspec(1, 3, wspace=0.3)
-                ax_c = fig.add_subplot(gs_ang[0, 0]); ax_c.plot(x_frames, cx_d, 'k-', alpha=0.5); ax_c.set_title("Coxa (°)", fontsize=9); ax_c.set_xticks([])
-                ax_p = fig.add_subplot(gs_ang[0, 1]); ax_p.plot(x_frames, pn_d, 'k-', alpha=0.5); ax_p.set_title("Perna (°)", fontsize=9); ax_p.set_xticks([])
-                ax_f = fig.add_subplot(gs_ang[0, 2]); ax_f.plot(x_frames, pe_d, 'k-', alpha=0.5); ax_f.set_title("Pé (°)", fontsize=9); ax_f.set_xticks([])
-                dots_direita['ang_c'], = ax_c.plot([], [], 'ro', markersize=6)
-                dots_direita['ang_p'], = ax_p.plot([], [], 'ro', markersize=6)
-                dots_direita['ang_f'], = ax_f.plot([], [], 'ro', markersize=6)
-                r_idx += 1
-
-            if self.opt_aa:
-                gs_aa = gs_right[r_idx, 0].subgridspec(1, 2, wspace=0.3)
-                ax_aa_cp = fig.add_subplot(gs_aa[0, 0]); ax_aa_cp.plot(cx_d, pn_d, 'k-', alpha=0.5); ax_aa_cp.set_title("Angle-Angle\nCoxa-Perna", fontsize=9)
-                ax_aa_pp = fig.add_subplot(gs_aa[0, 1]); ax_aa_pp.plot(pn_d, pe_d, 'k-', alpha=0.5); ax_aa_pp.set_title("Angle-Angle\nPerna-Pé", fontsize=9)
-                dots_direita['aa_cp'], = ax_aa_cp.plot([], [], 'ro', markersize=6)
-                dots_direita['aa_pp'], = ax_aa_pp.plot([], [], 'ro', markersize=6)
-                r_idx += 1
-
-            if self.opt_ca:
-                gs_ca = gs_right[r_idx, 0].subgridspec(1, 2, wspace=0.3)
-                ax_ca_cp = fig.add_subplot(gs_ca[0, 0]); ax_ca_cp.plot(x_frames, ca_cp_d, 'k-', alpha=0.5); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title("Coupling Angle\nCoxa-Perna (°)", fontsize=9); ax_ca_cp.set_xticks([])
-                ax_ca_pp = fig.add_subplot(gs_ca[0, 1]); ax_ca_pp.plot(x_frames, ca_pp_d, 'k-', alpha=0.5); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title("Coupling Angle\nPerna-Pé (°)", fontsize=9); ax_ca_pp.set_xticks([])
-                dots_direita['ca_cp'], = ax_ca_cp.plot([], [], 'ro', markersize=6)
-                dots_direita['ca_pp'], = ax_ca_pp.plot([], [], 'ro', markersize=6)
-
-            elementos_dinamicos.extend(list(dots_direita.values()))
-
-        linhas_3d = {}
-
-        def update(i_frame):
-            seg = self.montar_frame(i_frame)
-            for k in list(linhas_3d):
-                if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
+        try:
+            if self.proc.segmentos_df is None or len(self.proc.segmentos_df) < 5:
+                return False, "Dados insuficientes no dataframe (menos de 5 frames)."
             
-            for n, (p1, p2) in seg.items():
-                c = 'red' if '_D' in n else ('blue' if '_E' in n else 'black')
-                x_plot = [-p1[0], -p2[0]]; y_plot = [p1[1], p2[1]]; z_plot = [p1[2], p2[2]]
-                
-                if n in linhas_3d:
-                    linhas_3d[n].set_data(x_plot, y_plot); linhas_3d[n].set_3d_properties(z_plot)
-                else: 
-                    linhas_3d[n], = ax_3d.plot(x_plot, y_plot, z_plot, c=c, lw=2.5)
+            # GARANTIA ABSOLUTA DE ÍNDICE:
+            # Corta o processamento estritamente no tamanho que de fato existe (-1 pra permitir numpy.diff)
+            total_frames = len(self.proc.segmentos_df) - 1
             
+            cx_d = self.proc.segmentos_df['Coxa_D'].values[:total_frames]
+            pn_d = self.proc.segmentos_df['Perna_D'].values[:total_frames]
+            pe_d = self.proc.segmentos_df['Pe_D'].values[:total_frames]
+            cx_e = self.proc.segmentos_df['Coxa_E'].values[:total_frames]
+            pn_e = self.proc.segmentos_df['Perna_E'].values[:total_frames]
+            pe_e = self.proc.segmentos_df['Pe_E'].values[:total_frames]
+
+            def calc_ca(prox, dist):
+                dx, dy = -np.diff(prox), -np.diff(dist)
+                ca = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
+                ca = np.append(ca, ca[-1] if len(ca) > 0 else 0)
+                return ca
+
+            ca_cp_d = calc_ca(cx_d, pn_d)
+            ca_pp_d = calc_ca(pn_d, pe_d)
+            ca_cp_e = calc_ca(cx_e, pn_e)
+            ca_pp_e = calc_ca(pn_e, pe_e)
+            
+            # --- CONSTRUÇÃO DO LAYOUT GRID ---
+            largura = 7
+            ratios = []
+            if self.opt_bussolas: ratios.append(1); largura += 2
+            ratios.append(2) # Espaço do Box 3D
+            opts_dir = sum([self.opt_ang, self.opt_aa, self.opt_ca])
+            if opts_dir > 0: ratios.append(1.5); largura += 4
+            
+            fig = plt.figure(figsize=(largura, 6))
+            gs = fig.add_gridspec(1, len(ratios), width_ratios=ratios)
+            col = 0
+            
+            # PAINEL ESQUERDO: Bússolas
+            bussolas = {}
             if self.opt_bussolas:
-                angulos = [ca_cp_d[i_frame], ca_cp_e[i_frame], ca_pp_d[i_frame], ca_pp_e[i_frame]]
-                ptrs = [ptr_cp_d, ptr_cp_e, ptr_pp_d, ptr_pp_e]
-                txts = [txt_cp_d, txt_cp_e, txt_pp_d, txt_pp_e]
-                for ang, ptr, txt in zip(angulos, ptrs, txts):
-                    if np.isnan(ang):
+                gs_l = gs[0, col].subgridspec(2, 2)
+                bussolas['cp_d'] = self._criar_bussola(fig.add_subplot(gs_l[0,0]), "Coxa-Perna(D)")
+                bussolas['cp_e'] = self._criar_bussola(fig.add_subplot(gs_l[0,1]), "Coxa-Perna(E)")
+                bussolas['pp_d'] = self._criar_bussola(fig.add_subplot(gs_l[1,0]), "Perna-Pé(D)")
+                bussolas['pp_e'] = self._criar_bussola(fig.add_subplot(gs_l[1,1]), "Perna-Pé(E)")
+                col += 1
+
+            # PAINEL CENTRAL: Modelo 3D
+            ax_3d = fig.add_subplot(gs[0, col], projection='3d')
+            ax_3d.set_xlim(self.box['x']); ax_3d.set_ylim(self.box['y']); ax_3d.set_zlim(self.box['z'])
+            ax_3d.view_init(elev=20, azim=135)
+            ax_3d.set_title(self.nome_arq)
+            col += 1
+
+            # PAINEL DIREITO: Gráficos
+            dots = {}
+            if opts_dir > 0:
+                gs_r = gs[0, col].subgridspec(opts_dir, 1, hspace=0.4)
+                r = 0
+                x_axis = np.arange(total_frames)
+                
+                if self.opt_ang:
+                    gs_ang = gs_r[r, 0].subgridspec(1, 3)
+                    ax1 = fig.add_subplot(gs_ang[0,0]); ax1.plot(x_axis, cx_d, 'k-', alpha=0.4); ax1.set_title("Coxa(°)", fontsize=9); ax1.set_xticks([])
+                    ax2 = fig.add_subplot(gs_ang[0,1]); ax2.plot(x_axis, pn_d, 'k-', alpha=0.4); ax2.set_title("Perna(°)", fontsize=9); ax2.set_xticks([])
+                    ax3 = fig.add_subplot(gs_ang[0,2]); ax3.plot(x_axis, pe_d, 'k-', alpha=0.4); ax3.set_title("Pé(°)", fontsize=9); ax3.set_xticks([])
+                    dots['ang_c'], = ax1.plot([], [], 'ro')
+                    dots['ang_p'], = ax2.plot([], [], 'ro')
+                    dots['ang_f'], = ax3.plot([], [], 'ro')
+                    r += 1
+                    
+                if self.opt_aa:
+                    gs_aa = gs_r[r, 0].subgridspec(1, 2)
+                    ax1 = fig.add_subplot(gs_aa[0,0]); ax1.plot(cx_d, pn_d, 'k-', alpha=0.4); ax1.set_title("AA Coxa-Perna", fontsize=9)
+                    ax2 = fig.add_subplot(gs_aa[0,1]); ax2.plot(pn_d, pe_d, 'k-', alpha=0.4); ax2.set_title("AA Perna-Pé", fontsize=9)
+                    dots['aa_cp'], = ax1.plot([], [], 'ro')
+                    dots['aa_pp'], = ax2.plot([], [], 'ro')
+                    r += 1
+                    
+                if self.opt_ca:
+                    gs_ca = gs_r[r, 0].subgridspec(1, 2)
+                    ax1 = fig.add_subplot(gs_ca[0,0]); ax1.plot(x_axis, ca_cp_d, 'k-', alpha=0.4); ax1.set_title("CA Coxa-Perna", fontsize=9); ax1.set_ylim(0,360); ax1.set_yticks([0,180,360]); ax1.set_xticks([])
+                    ax2 = fig.add_subplot(gs_ca[0,1]); ax2.plot(x_axis, ca_pp_d, 'k-', alpha=0.4); ax2.set_title("CA Perna-Pé", fontsize=9); ax2.set_ylim(0,360); ax2.set_yticks([0,180,360]); ax2.set_xticks([])
+                    dots['ca_cp'], = ax1.plot([], [], 'ro')
+                    dots['ca_pp'], = ax2.plot([], [], 'ro')
+
+            linhas_3d = {}
+
+            def set_bussola(chave, angulo):
+                if chave in bussolas:
+                    ptr, txt = bussolas[chave]
+                    if np.isnan(angulo):
                         ptr.set_data([], []); txt.set_text("-"); txt.set_color("gray")
                     else:
-                        ptr.set_data([0, np.cos(np.radians(ang))], [0, np.sin(np.radians(ang))])
-                        lbl, cor = self._classificar_angulo(ang)
-                        txt.set_text(lbl); txt.set_color(cor)
+                        ptr.set_data([0, np.cos(np.radians(angulo))], [0, np.sin(np.radians(angulo))])
+                        a = angulo % 360
+                        if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): lbl, c = "PROXIMAL", '#e74c3c'
+                        elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): lbl, c = "EM FASE", '#2ecc71'
+                        elif (67.5 <= a < 112.5) or (247.5 <= a < 292.5): lbl, c = "DISTAL", '#3498db'
+                        else: lbl, c = "ANTI-FASE", '#f1c40f'
+                        txt.set_text(lbl); txt.set_color(c)
 
-            if self.opt_ang:
-                dots_direita['ang_c'].set_data([i_frame], [cx_d[i_frame]])
-                dots_direita['ang_p'].set_data([i_frame], [pn_d[i_frame]])
-                dots_direita['ang_f'].set_data([i_frame], [pe_d[i_frame]])
-            if self.opt_aa:
-                dots_direita['aa_cp'].set_data([cx_d[i_frame]], [pn_d[i_frame]])
-                dots_direita['aa_pp'].set_data([pn_d[i_frame]], [pe_d[i_frame]])
-            if self.opt_ca:
-                dots_direita['ca_cp'].set_data([i_frame], [ca_cp_d[i_frame]])
-                dots_direita['ca_pp'].set_data([i_frame], [ca_pp_d[i_frame]])
+            def update(i):
+                # Animação 3D (Com Eixo X invertido para caminhar para a frente)
+                seg = self.montar_frame(i)
+                for k in list(linhas_3d):
+                    if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
+                
+                for n, (p1, p2) in seg.items():
+                    c = 'red' if '_D' in n else ('blue' if '_E' in n else 'black')
+                    x_plot = [-p1[0], -p2[0]] # Inversão Horizontal
+                    if n in linhas_3d:
+                        linhas_3d[n].set_data(x_plot, [p1[1], p2[1]])
+                        linhas_3d[n].set_3d_properties([p1[2], p2[2]])
+                    else: 
+                        linhas_3d[n], = ax_3d.plot(x_plot, [p1[1], p2[1]], [p1[2], p2[2]], c=c, lw=2.5)
+                
+                if self.opt_bussolas:
+                    set_bussola('cp_d', ca_cp_d[i])
+                    set_bussola('cp_e', ca_cp_e[i])
+                    set_bussola('pp_d', ca_pp_d[i])
+                    set_bussola('pp_e', ca_pp_e[i])
+                    
+                if self.opt_ang:
+                    dots['ang_c'].set_data([i], [cx_d[i]])
+                    dots['ang_p'].set_data([i], [pn_d[i]])
+                    dots['ang_f'].set_data([i], [pe_d[i]])
+                if self.opt_aa:
+                    dots['aa_cp'].set_data([cx_d[i]], [pn_d[i]])
+                    dots['aa_pp'].set_data([pn_d[i]], [pe_d[i]])
+                if self.opt_ca:
+                    dots['ca_cp'].set_data([i], [ca_cp_d[i]])
+                    dots['ca_pp'].set_data([i], [ca_pp_d[i]])
+                    
+                return list(linhas_3d.values()) + list(dots.values())
 
-            return list(linhas_3d.values()) + elementos_dinamicos
-
-        ani = animation.FuncAnimation(fig, update, frames=range(0, total_frames, step), interval=50, blit=False)
-        try:
+            ani = animation.FuncAnimation(fig, update, frames=range(0, total_frames, step), interval=50, blit=False)
             ani.save(caminho_final, writer='pillow', fps=fps_anim)
             return True, caminho_final
-        except Exception as e: return False, f"Erro: {str(e)}"
-        finally: plt.close(fig); plt.close('all')
+        
+        except Exception as e:
+            import traceback
+            return False, f"Falha no processador visual: {str(e)}\n\nRastreio de Erro:\n{traceback.format_exc()}"
+        finally:
+            plt.close(fig)
+            plt.close('all')
 
 # =============================================================================
 # FUNÇÕES GLOBAIS STREAMLIT DE FILTRAGEM E CÁLCULO
