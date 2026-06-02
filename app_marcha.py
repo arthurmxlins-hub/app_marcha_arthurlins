@@ -347,30 +347,46 @@ class GeradorVisual:
         if p1 is not None and p2 is not None: return (p1 + p2) / 2.0
         return p1 if p1 is not None else p2
 
+    def _get_primeiro_valido(self, lista_nomes, f):
+        """ Busca segura de marcadores para evitar erro de avaliação booleana no NumPy """
+        for nome in lista_nomes:
+            val = self._get_f(nome, f)
+            if val is not None:
+                return val
+        return None
+
     def montar_frame(self, f):
         s = {}
-        rias = self._get_f('RIAS', f) or self._get_f('RASI', f)
-        lias = self._get_f('LIAS', f) or self._get_f('LASI', f)
-        rips = self._get_f('RIPS', f) or self._get_f('RPSI', f)
-        lips = self._get_f('LIPS', f) or self._get_f('LPSI', f)
+        # Substituição do 'or' pelo método seguro _get_primeiro_valido
+        rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
+        lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
+        rips = self._get_primeiro_valido(['RIPS', 'RPSI'], f)
+        lips = self._get_primeiro_valido(['LIPS', 'LPSI'], f)
         
         quad_d = rias if rias is not None else rips
         quad_e = lias if lias is not None else lips
 
-        kd = self._mid_f('RLE', 'RME', f) or self._get_f('RLE', f) or self._get_f('RKN', f)
-        ke = self._mid_f('LLE', 'LME', f) or self._get_f('LLE', f) or self._get_f('LKN', f)
-        td = self._mid_f('RML', 'RMM', f) or self._get_f('RML', f) or self._get_f('RANK', f)
-        te = self._mid_f('LML', 'LMM', f) or self._get_f('LML', f) or self._get_f('LANK', f)
+        kd = self._mid_f('RLE', 'RME', f)
+        if kd is None: kd = self._get_primeiro_valido(['RLE', 'RKN'], f)
+        
+        ke = self._mid_f('LLE', 'LME', f)
+        if ke is None: ke = self._get_primeiro_valido(['LLE', 'LKN'], f)
+        
+        td = self._mid_f('RML', 'RMM', f)
+        if td is None: td = self._get_primeiro_valido(['RML', 'RANK'], f)
+        
+        te = self._mid_f('LML', 'LMM', f)
+        if te is None: te = self._get_primeiro_valido(['LML', 'LANK'], f)
 
         if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
         if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
         if kd is not None and td is not None: s['Perna_D'] = [kd, td]
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
-        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f)
-        h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
-        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f)
-        t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
+        h_d = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
+        h_e = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
+        t_d = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
+        t_e = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
 
         if td is not None and h_d is not None: s['Pe_Calcanhar_D'] = [td, h_d]
         if td is not None and t_d is not None: s['Pe_Ponta_D'] = [td, t_d]
@@ -398,8 +414,6 @@ class GeradorVisual:
             if self.proc.segmentos_df is None or len(self.proc.segmentos_df) < 5:
                 return False, "Dados insuficientes no dataframe (menos de 5 frames)."
             
-            # GARANTIA ABSOLUTA DE ÍNDICE:
-            # Corta o processamento estritamente no tamanho que de fato existe (-1 pra permitir numpy.diff)
             total_frames = len(self.proc.segmentos_df) - 1
             
             cx_d = self.proc.segmentos_df['Coxa_D'].values[:total_frames]
@@ -541,7 +555,6 @@ class GeradorVisual:
         finally:
             plt.close(fig)
             plt.close('all')
-
 # =============================================================================
 # FUNÇÕES GLOBAIS STREAMLIT DE FILTRAGEM E CÁLCULO
 # =============================================================================
