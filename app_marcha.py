@@ -348,18 +348,16 @@ class GeradorVisual:
         return p1 if p1 is not None else p2
 
     def _get_primeiro_valido(self, lista_nomes, f):
-        """ Busca segura de marcadores para evitar erro de avaliação booleana no NumPy """
         for nome in lista_nomes:
             val = self._get_f(nome, f)
-            if val is not None:
-                return val
+            if val is not None: return val
         return None
 
     def montar_frame(self, f):
         s = {}
         
         # =========================================================
-        # 1. PELVE (Modelo LACAF: RIAS, LIAS, RIPS, LIPS, RICT, LICT)
+        # 1. PELVE (AZUL)
         # =========================================================
         rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
         lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
@@ -368,7 +366,6 @@ class GeradorVisual:
         rict = self._get_primeiro_valido(['RICT'], f)
         lict = self._get_primeiro_valido(['LICT'], f)
         
-        # Desenho do Cinturão Pélvico 3D (Polígono Completo)
         if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
         if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
         if rict is not None and rias is not None: s['Pelve_Dir_Ant'] = [rict, rias]
@@ -376,12 +373,11 @@ class GeradorVisual:
         if lict is not None and lias is not None: s['Pelve_Esq_Ant'] = [lict, lias]
         if lict is not None and lips is not None: s['Pelve_Esq_Post'] = [lict, lips]
         
-        # Âncora do Quadril (Aproximação visual usando a ASIS ou PSIS)
         quad_d = rias if rias is not None else (rips if rips is not None else rict)
         quad_e = lias if lias is not None else (lips if lips is not None else lict)
 
         # =========================================================
-        # 2. JOELHOS (LACAF: Centro entre RLE e RME)
+        # 2. JOELHOS 
         # =========================================================
         kd = self._mid_f('RLE', 'RME', f)
         if kd is None: kd = self._get_primeiro_valido(['RLE', 'RME', 'RKN'], f)
@@ -390,27 +386,13 @@ class GeradorVisual:
         if ke is None: ke = self._get_primeiro_valido(['LLE', 'LME', 'LKN'], f)
 
         # =========================================================
-        # 3. COXAS (LACAF: Uso de RTHI e LTHI para rastreio volumétrico)
+        # 3. COXAS DIRETAS (Enxutas)
         # =========================================================
-        rthi = self._get_primeiro_valido(['RTHI'], f)
-        lthi = self._get_primeiro_valido(['LTHI'], f)
-
-        if quad_d is not None and kd is not None:
-            if rthi is not None:
-                s['Coxa_D_Sup'] = [quad_d, rthi]
-                s['Coxa_D_Inf'] = [rthi, kd]
-            else:
-                s['Coxa_D'] = [quad_d, kd] # Fallback direto
-                
-        if quad_e is not None and ke is not None:
-            if lthi is not None:
-                s['Coxa_E_Sup'] = [quad_e, lthi]
-                s['Coxa_E_Inf'] = [lthi, ke]
-            else:
-                s['Coxa_E'] = [quad_e, ke] # Fallback direto
+        if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
+        if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
 
         # =========================================================
-        # 4. TORNOZELOS E PERNAS (LACAF: Centro entre RML e RMM)
+        # 4. TORNOZELOS E PERNAS
         # =========================================================
         td = self._mid_f('RML', 'RMM', f)
         if td is None: td = self._get_primeiro_valido(['RML', 'RMM', 'RANK'], f)
@@ -422,7 +404,7 @@ class GeradorVisual:
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
         # =========================================================
-        # 5. PÉS 3D COMPLETOS (LACAF: Calcanhar, 1º Meta e 5º Meta)
+        # 5. PÉS EM PIRÂMIDE (Base triangular fechada com o Tornozelo)
         # =========================================================
         rcal = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
         lcal = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
@@ -431,21 +413,21 @@ class GeradorVisual:
         rft5 = self._get_primeiro_valido(['RFT5'], f)
         lft5 = self._get_primeiro_valido(['LFT5'], f)
 
-        # Construção da "Gaiola" Geométrica do Pé Direito
+        # Pirâmide Direita
         if td is not None and rcal is not None: s['Pe_Tornoz_Calc_D'] = [td, rcal]
-        if rcal is not None and rft1 is not None: s['Pe_Borda_Medial_D'] = [rcal, rft1]
-        if rcal is not None and rft5 is not None: s['Pe_Borda_Lateral_D'] = [rcal, rft5]
-        if rft1 is not None and rft5 is not None: s['Pe_Frente_D'] = [rft1, rft5]
-        if td is not None and rft1 is not None: s['Pe_Dorso_Medial_D'] = [td, rft1]
-        if td is not None and rft5 is not None: s['Pe_Dorso_Lateral_D'] = [td, rft5]
+        if td is not None and rft1 is not None: s['Pe_Tornoz_M1_D'] = [td, rft1]
+        if td is not None and rft5 is not None: s['Pe_Tornoz_M5_D'] = [td, rft5]
+        if rcal is not None and rft1 is not None: s['Pe_Sola_Medial_D'] = [rcal, rft1]
+        if rcal is not None and rft5 is not None: s['Pe_Sola_Lateral_D'] = [rcal, rft5]
+        if rft1 is not None and rft5 is not None: s['Pe_Sola_Frente_D'] = [rft1, rft5]
 
-        # Construção da "Gaiola" Geométrica do Pé Esquerdo
+        # Pirâmide Esquerda
         if te is not None and lcal is not None: s['Pe_Tornoz_Calc_E'] = [te, lcal]
-        if lcal is not None and lft1 is not None: s['Pe_Borda_Medial_E'] = [lcal, lft1]
-        if lcal is not None and lft5 is not None: s['Pe_Borda_Lateral_E'] = [lcal, lft5]
-        if lft1 is not None and lft5 is not None: s['Pe_Frente_E'] = [lft1, lft5]
-        if te is not None and lft1 is not None: s['Pe_Dorso_Medial_E'] = [te, lft1]
-        if te is not None and lft5 is not None: s['Pe_Dorso_Lateral_E'] = [te, lft5]
+        if te is not None and lft1 is not None: s['Pe_Tornoz_M1_E'] = [te, lft1]
+        if te is not None and lft5 is not None: s['Pe_Tornoz_M5_E'] = [te, lft5]
+        if lcal is not None and lft1 is not None: s['Pe_Sola_Medial_E'] = [lcal, lft1]
+        if lcal is not None and lft5 is not None: s['Pe_Sola_Lateral_E'] = [lcal, lft5]
+        if lft1 is not None and lft5 is not None: s['Pe_Sola_Frente_E'] = [lft1, lft5]
         
         return s
 
@@ -488,11 +470,10 @@ class GeradorVisual:
             ca_cp_e = calc_ca(cx_e, pn_e)
             ca_pp_e = calc_ca(pn_e, pe_e)
             
-            # --- CONSTRUÇÃO DO LAYOUT GRID ---
             largura = 7
             ratios = []
             if self.opt_bussolas: ratios.append(1); largura += 2
-            ratios.append(2) # Espaço do Box 3D
+            ratios.append(2) 
             opts_dir = sum([self.opt_ang, self.opt_aa, self.opt_ca])
             if opts_dir > 0: ratios.append(1.5); largura += 4
             
@@ -500,7 +481,6 @@ class GeradorVisual:
             gs = fig.add_gridspec(1, len(ratios), width_ratios=ratios)
             col = 0
             
-            # PAINEL ESQUERDO: Bússolas
             bussolas = {}
             if self.opt_bussolas:
                 gs_l = gs[0, col].subgridspec(2, 2)
@@ -510,14 +490,12 @@ class GeradorVisual:
                 bussolas['pp_e'] = self._criar_bussola(fig.add_subplot(gs_l[1,1]), "Perna-Pé(E)")
                 col += 1
 
-            # PAINEL CENTRAL: Modelo 3D
             ax_3d = fig.add_subplot(gs[0, col], projection='3d')
             ax_3d.set_xlim(self.box['x']); ax_3d.set_ylim(self.box['y']); ax_3d.set_zlim(self.box['z'])
             ax_3d.view_init(elev=20, azim=135)
             ax_3d.set_title(self.nome_arq)
             col += 1
 
-            # PAINEL DIREITO: Gráficos
             dots = {}
             if opts_dir > 0:
                 gs_r = gs[0, col].subgridspec(opts_dir, 1, hspace=0.4)
@@ -566,14 +544,18 @@ class GeradorVisual:
                         txt.set_text(lbl); txt.set_color(c)
 
             def update(i):
-                # Animação 3D (Com Eixo X invertido para caminhar para a frente)
                 seg = self.montar_frame(i)
                 for k in list(linhas_3d):
                     if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
                 
                 for n, (p1, p2) in seg.items():
-                    c = 'red' if '_D' in n else ('blue' if '_E' in n else 'black')
-                    x_plot = [-p1[0], -p2[0]] # Inversão Horizontal
+                    # NOVO ESQUEMA DE CORES (Verde: Dir, Roxo: Esq, Azul: Pelve)
+                    if '_D' in n: c = 'green'
+                    elif '_E' in n: c = 'purple'
+                    elif 'Pelve' in n: c = 'blue'
+                    else: c = 'black'
+                    
+                    x_plot = [-p1[0], -p2[0]] # Inversão Horizontal no Plot
                     if n in linhas_3d:
                         linhas_3d[n].set_data(x_plot, [p1[1], p2[1]])
                         linhas_3d[n].set_3d_properties([p1[2], p2[2]])
