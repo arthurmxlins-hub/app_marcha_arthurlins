@@ -332,7 +332,6 @@ class GeradorVisual:
     def __init__(self, processador, nome_original, opt_bussolas=False, opt_ang=False, opt_aa=False, opt_ca=False):
         self.proc = processador
         self.nome_arq = nome_original
-        # Ajuste de zoom/box do 3D (se o modelo ficar pequeno, reduza estes valores, ex: -800 a 800)
         self.box = {'x': (-1000, 1000), 'y': (-1000, 1000), 'z': (0, 2000)}
         self.opt_bussolas = opt_bussolas
         self.opt_ang = opt_ang
@@ -358,7 +357,7 @@ class GeradorVisual:
         s = {}
         
         # =========================================================
-        # 1. PELVE (Será pintada de Azul no plot)
+        # 1. PELVE COMPLETA (AZUL) - Todas as conexões
         # =========================================================
         rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
         lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
@@ -374,12 +373,14 @@ class GeradorVisual:
         if rict is not None:
             if rias is not None: s['Pelve_Crista_Ant_D'] = [rict, rias]
             if rips is not None: s['Pelve_Crista_Post_D'] = [rict, rips]
-        elif rias is not None and rips is not None: s['Pelve_Lat_D'] = [rias, rips] 
+        elif rias is not None and rips is not None:
+            s['Pelve_Lat_D'] = [rias, rips]
             
         if lict is not None:
             if lias is not None: s['Pelve_Crista_Ant_E'] = [lict, lias]
             if lips is not None: s['Pelve_Crista_Post_E'] = [lict, lips]
-        elif lias is not None and lips is not None: s['Pelve_Lat_E'] = [lias, lips]
+        elif lias is not None and lips is not None:
+            s['Pelve_Lat_E'] = [lias, lips]
 
         if sacr is not None:
             if rips is not None: s['Pelve_Sacro_D'] = [rips, sacr]
@@ -395,11 +396,12 @@ class GeradorVisual:
         # =========================================================
         kd = self._mid_f('RLE', 'RME', f)
         if kd is None: kd = self._get_primeiro_valido(['RLE', 'RME', 'RKN'], f)
+        
         ke = self._mid_f('LLE', 'LME', f)
         if ke is None: ke = self._get_primeiro_valido(['LLE', 'LME', 'LKN'], f)
 
         # =========================================================
-        # 3. COXAS DIRETAS (Sendo o RTHI/LTHI ignorados)
+        # 3. COXAS DIRETAS
         # =========================================================
         if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
         if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
@@ -409,6 +411,7 @@ class GeradorVisual:
         # =========================================================
         td = self._mid_f('RML', 'RMM', f)
         if td is None: td = self._get_primeiro_valido(['RML', 'RMM', 'RANK'], f)
+        
         te = self._mid_f('LML', 'LMM', f)
         if te is None: te = self._get_primeiro_valido(['LML', 'LMM', 'LANK'], f)
 
@@ -416,7 +419,7 @@ class GeradorVisual:
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
         # =========================================================
-        # 5. PÉS EM PIRÂMIDE (Base triangular)
+        # 5. PÉS EM PIRÂMIDE (Base triangular fechada)
         # =========================================================
         rcal = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
         lcal = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
@@ -425,7 +428,6 @@ class GeradorVisual:
         rft5 = self._get_primeiro_valido(['RFT5'], f)
         lft5 = self._get_primeiro_valido(['LFT5'], f)
 
-        # Pirâmide Direita
         if td is not None and rcal is not None: s['Pe_Tornoz_Calc_D'] = [td, rcal]
         if td is not None and rft1 is not None: s['Pe_Tornoz_M1_D'] = [td, rft1]
         if td is not None and rft5 is not None: s['Pe_Tornoz_M5_D'] = [td, rft5]
@@ -433,7 +435,6 @@ class GeradorVisual:
         if rcal is not None and rft5 is not None: s['Pe_Sola_Lateral_D'] = [rcal, rft5]
         if rft1 is not None and rft5 is not None: s['Pe_Sola_Frente_D'] = [rft1, rft5]
 
-        # Pirâmide Esquerda
         if te is not None and lcal is not None: s['Pe_Tornoz_Calc_E'] = [te, lcal]
         if te is not None and lft1 is not None: s['Pe_Tornoz_M1_E'] = [te, lft1]
         if te is not None and lft5 is not None: s['Pe_Tornoz_M5_E'] = [te, lft5]
@@ -507,9 +508,11 @@ class GeradorVisual:
             ax_3d.view_init(elev=20, azim=135)
             ax_3d.set_title(self.nome_arq)
             
-            # Remover os eixos internos do Matplotlib para focar mais no modelo 3D limpo
-            ax_3d.xaxis.pane.fill = False; ax_3d.yaxis.pane.fill = False; ax_3d.zaxis.pane.fill = False
-            ax_3d.grid(False)
+            # Mantém a grade de fundo mas remove as legendas numeradas dos eixos
+            ax_3d.grid(True)
+            ax_3d.set_xticklabels([])
+            ax_3d.set_yticklabels([])
+            ax_3d.set_zticklabels([])
             
             col += 1
 
@@ -566,13 +569,13 @@ class GeradorVisual:
                     if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
                 
                 for n, (p1, p2) in seg.items():
-                    # Definição das cores das Bolinhas (Marcadores)
+                    # NOVO ESQUEMA INVERTIDO: Direito = Roxo, Esquerdo = Verde
                     if 'Pelve' in n: cor_bolinha = '#3498db' # Azul
-                    elif '_D' in n: cor_bolinha = '#2ecc71'  # Verde
-                    elif '_E' in n: cor_bolinha = '#9b59b6'  # Roxo
+                    elif '_D' in n: cor_bolinha = '#9b59b6'  # Roxo
+                    elif '_E' in n: cor_bolinha = '#2ecc71'  # Verde
                     else: cor_bolinha = 'gray'
                     
-                    x_plot = [-p1[0], -p2[0]] # Inversão Horizontal no Plot
+                    x_plot = [-p1[0], -p2[0]] # Inversão Horizontal
                     y_plot = [p1[1], p2[1]]
                     z_plot = [p1[2], p2[2]]
                     
@@ -580,16 +583,18 @@ class GeradorVisual:
                         linhas_3d[n].set_data(x_plot, y_plot)
                         linhas_3d[n].set_3d_properties(z_plot)
                     else: 
-                        # ESTILO QUALISYS: Osso Amarelo (Gold) grosso + Bolinhas Coloridas com contorno preto
+                        # Ordem de Sobreposição: zorder=4 garante a pelve por cima das coxas.
+                        z_ord = 4 if 'Pelve' in n else 3
+                        
                         linhas_3d[n], = ax_3d.plot(x_plot, y_plot, z_plot, 
-                                                   color='#f1c40f',          # Cor do Osso (Amarelo)
-                                                   linewidth=3.0,            # Espessura do Osso
-                                                   marker='o',               # Formato do Marcador
-                                                   markerfacecolor=cor_bolinha, # Cor interna do marcador
-                                                   markeredgecolor='black',  # Contorno do marcador
+                                                   color='#f1c40f',             # Osso (Amarelo)
+                                                   linewidth=3.0,               
+                                                   marker='o',                  
+                                                   markerfacecolor=cor_bolinha, # Cor Interna da bolinha
+                                                   markeredgecolor='black',     # Contorno de laboratório
                                                    markeredgewidth=0.8,
-                                                   markersize=6,             # Tamanho da bolinha
-                                                   zorder=3)
+                                                   markersize=6,                
+                                                   zorder=z_ord)
                 
                 if self.opt_bussolas:
                     set_bussola('cp_d', ca_cp_d[i])
