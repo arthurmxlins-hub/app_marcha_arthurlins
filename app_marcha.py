@@ -326,12 +326,13 @@ class ProcessadorCinematico:
         return res
 
 # =============================================================================
-# MÓDULO VISUAL MODULAR (GIFs) 
+# MÓDULO VISUAL MODULAR (GIFs Estilo Qualisys QTM) 
 # =============================================================================
 class GeradorVisual:
     def __init__(self, processador, nome_original, opt_bussolas=False, opt_ang=False, opt_aa=False, opt_ca=False):
         self.proc = processador
         self.nome_arq = nome_original
+        # Ajuste de zoom/box do 3D (se o modelo ficar pequeno, reduza estes valores, ex: -800 a 800)
         self.box = {'x': (-1000, 1000), 'y': (-1000, 1000), 'z': (0, 2000)}
         self.opt_bussolas = opt_bussolas
         self.opt_ang = opt_ang
@@ -354,47 +355,92 @@ class GeradorVisual:
         return None
 
     def montar_frame(self, f):
-        """ 
-        Visão Matemática (Raio-X do Processador):
-        Desenha EXATAMENTE os mesmos vetores usados em _calcular_angulos_segmentares()
-        """
         s = {}
         
-        # 1. PONTOS DA MATEMÁTICA (Direito e Esquerdo)
-        # Quadril (Usa apenas o ASIS frontal, ignorando o restante da pelve)
-        h_d = self._get_primeiro_valido(['RIAS', 'RASI'], f)
-        h_e = self._get_primeiro_valido(['LIAS', 'LASI'], f)
+        # =========================================================
+        # 1. PELVE (Será pintada de Azul no plot)
+        # =========================================================
+        rias = self._get_primeiro_valido(['RIAS', 'RASI'], f)
+        lias = self._get_primeiro_valido(['LIAS', 'LASI'], f)
+        rips = self._get_primeiro_valido(['RIPS', 'RPSI'], f)
+        lips = self._get_primeiro_valido(['LIPS', 'LPSI'], f)
+        rict = self._get_primeiro_valido(['RICT'], f)
+        lict = self._get_primeiro_valido(['LICT'], f)
+        sacr = self._get_primeiro_valido(['SACR', 'SACRUM'], f)
         
-        # Joelho (Centro exato entre os epicôndilos)
-        k_d = self._mid_f('RLE', 'RME', f)
-        k_e = self._mid_f('LLE', 'LME', f)
+        if rias is not None and lias is not None: s['Pelve_Frente'] = [rias, lias]
+        if rips is not None and lips is not None: s['Pelve_Tras'] = [rips, lips]
         
-        # Tornozelo (Centro exato entre os maléolos)
-        a_d = self._mid_f('RML', 'RMM', f)
-        a_e = self._mid_f('LML', 'LMM', f)
-        
-        # Pé (Calcâneo e 1º Metatarso estritos)
-        cal_d = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
-        p_d = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
-        cal_e = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
-        p_e = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
+        if rict is not None:
+            if rias is not None: s['Pelve_Crista_Ant_D'] = [rict, rias]
+            if rips is not None: s['Pelve_Crista_Post_D'] = [rict, rips]
+        elif rias is not None and rips is not None: s['Pelve_Lat_D'] = [rias, rips] 
+            
+        if lict is not None:
+            if lias is not None: s['Pelve_Crista_Ant_E'] = [lict, lias]
+            if lips is not None: s['Pelve_Crista_Post_E'] = [lict, lips]
+        elif lias is not None and lips is not None: s['Pelve_Lat_E'] = [lias, lips]
 
-        # 2. MONTAGEM DOS VETORES ESTRITOS (Como a cinemática os vê)
-        # Segmento da Coxa
-        if h_d is not None and k_d is not None: s['Coxa_D'] = [h_d, k_d]
-        if h_e is not None and k_e is not None: s['Coxa_E'] = [h_e, k_e]
+        if sacr is not None:
+            if rips is not None: s['Pelve_Sacro_D'] = [rips, sacr]
+            if lips is not None: s['Pelve_Sacro_E'] = [lips, sacr]
+            if rips is None and rias is not None: s['Pelve_Sacro_Alt_D'] = [rias, sacr]
+            if lips is None and lias is not None: s['Pelve_Sacro_Alt_E'] = [lias, sacr]
         
-        # Segmento da Perna
-        if k_d is not None and a_d is not None: s['Perna_D'] = [k_d, a_d]
-        if k_e is not None and a_e is not None: s['Perna_E'] = [k_e, a_e]
+        quad_d = rias if rias is not None else (rips if rips is not None else (rict if rict is not None else sacr))
+        quad_e = lias if lias is not None else (lips if lips is not None else (lict if lict is not None else sacr))
+
+        # =========================================================
+        # 2. JOELHOS 
+        # =========================================================
+        kd = self._mid_f('RLE', 'RME', f)
+        if kd is None: kd = self._get_primeiro_valido(['RLE', 'RME', 'RKN'], f)
+        ke = self._mid_f('LLE', 'LME', f)
+        if ke is None: ke = self._get_primeiro_valido(['LLE', 'LME', 'LKN'], f)
+
+        # =========================================================
+        # 3. COXAS DIRETAS (Sendo o RTHI/LTHI ignorados)
+        # =========================================================
+        if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
+        if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
+
+        # =========================================================
+        # 4. TORNOZELOS E PERNAS
+        # =========================================================
+        td = self._mid_f('RML', 'RMM', f)
+        if td is None: td = self._get_primeiro_valido(['RML', 'RMM', 'RANK'], f)
+        te = self._mid_f('LML', 'LMM', f)
+        if te is None: te = self._get_primeiro_valido(['LML', 'LMM', 'LANK'], f)
+
+        if kd is not None and td is not None: s['Perna_D'] = [kd, td]
+        if ke is not None and te is not None: s['Perna_E'] = [ke, te]
+
+        # =========================================================
+        # 5. PÉS EM PIRÂMIDE (Base triangular)
+        # =========================================================
+        rcal = self._get_primeiro_valido(['RCAL', 'RHEE'], f)
+        lcal = self._get_primeiro_valido(['LCAL', 'LHEE'], f)
+        rft1 = self._get_primeiro_valido(['RFT1', 'RTOE'], f)
+        lft1 = self._get_primeiro_valido(['LFT1', 'LTOE'], f)
+        rft5 = self._get_primeiro_valido(['RFT5'], f)
+        lft5 = self._get_primeiro_valido(['LFT5'], f)
+
+        # Pirâmide Direita
+        if td is not None and rcal is not None: s['Pe_Tornoz_Calc_D'] = [td, rcal]
+        if td is not None and rft1 is not None: s['Pe_Tornoz_M1_D'] = [td, rft1]
+        if td is not None and rft5 is not None: s['Pe_Tornoz_M5_D'] = [td, rft5]
+        if rcal is not None and rft1 is not None: s['Pe_Sola_Medial_D'] = [rcal, rft1]
+        if rcal is not None and rft5 is not None: s['Pe_Sola_Lateral_D'] = [rcal, rft5]
+        if rft1 is not None and rft5 is not None: s['Pe_Sola_Frente_D'] = [rft1, rft5]
+
+        # Pirâmide Esquerda
+        if te is not None and lcal is not None: s['Pe_Tornoz_Calc_E'] = [te, lcal]
+        if te is not None and lft1 is not None: s['Pe_Tornoz_M1_E'] = [te, lft1]
+        if te is not None and lft5 is not None: s['Pe_Tornoz_M5_E'] = [te, lft5]
+        if lcal is not None and lft1 is not None: s['Pe_Sola_Medial_E'] = [lcal, lft1]
+        if lcal is not None and lft5 is not None: s['Pe_Sola_Lateral_E'] = [lcal, lft5]
+        if lft1 is not None and lft5 is not None: s['Pe_Sola_Frente_E'] = [lft1, lft5]
         
-        # Segmento do Pé (Vetor Único: Calcâneo -> Ponta do Pé)
-        if cal_d is not None and p_d is not None: s['Pe_D'] = [cal_d, p_d]
-        if cal_e is not None and p_e is not None: s['Pe_E'] = [cal_e, p_e]
-
-        # Linha Pélvica Frontal (apenas para conectar as pernas visualmente)
-        if h_d is not None and h_e is not None: s['Pelve_Virtual'] = [h_d, h_e]
-
         return s
 
     def _criar_bussola(self, ax, titulo):
@@ -460,6 +506,11 @@ class GeradorVisual:
             ax_3d.set_xlim(self.box['x']); ax_3d.set_ylim(self.box['y']); ax_3d.set_zlim(self.box['z'])
             ax_3d.view_init(elev=20, azim=135)
             ax_3d.set_title(self.nome_arq)
+            
+            # Remover os eixos internos do Matplotlib para focar mais no modelo 3D limpo
+            ax_3d.xaxis.pane.fill = False; ax_3d.yaxis.pane.fill = False; ax_3d.zaxis.pane.fill = False
+            ax_3d.grid(False)
+            
             col += 1
 
             dots = {}
@@ -515,18 +566,30 @@ class GeradorVisual:
                     if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
                 
                 for n, (p1, p2) in seg.items():
-                    # PRIORIDADE ABSOLUTA: Verifica 'Pelve' PRIMEIRO para não ser sobrescrito pelo lado (D/E)
-                    if 'Pelve' in n: c = 'blue'
-                    elif '_D' in n: c = 'green'
-                    elif '_E' in n: c = 'purple'
-                    else: c = 'black'
+                    # Definição das cores das Bolinhas (Marcadores)
+                    if 'Pelve' in n: cor_bolinha = '#3498db' # Azul
+                    elif '_D' in n: cor_bolinha = '#2ecc71'  # Verde
+                    elif '_E' in n: cor_bolinha = '#9b59b6'  # Roxo
+                    else: cor_bolinha = 'gray'
                     
                     x_plot = [-p1[0], -p2[0]] # Inversão Horizontal no Plot
+                    y_plot = [p1[1], p2[1]]
+                    z_plot = [p1[2], p2[2]]
+                    
                     if n in linhas_3d:
-                        linhas_3d[n].set_data(x_plot, [p1[1], p2[1]])
-                        linhas_3d[n].set_3d_properties([p1[2], p2[2]])
+                        linhas_3d[n].set_data(x_plot, y_plot)
+                        linhas_3d[n].set_3d_properties(z_plot)
                     else: 
-                        linhas_3d[n], = ax_3d.plot(x_plot, [p1[1], p2[1]], [p1[2], p2[2]], c=c, lw=2.5)
+                        # ESTILO QUALISYS: Osso Amarelo (Gold) grosso + Bolinhas Coloridas com contorno preto
+                        linhas_3d[n], = ax_3d.plot(x_plot, y_plot, z_plot, 
+                                                   color='#f1c40f',          # Cor do Osso (Amarelo)
+                                                   linewidth=3.0,            # Espessura do Osso
+                                                   marker='o',               # Formato do Marcador
+                                                   markerfacecolor=cor_bolinha, # Cor interna do marcador
+                                                   markeredgecolor='black',  # Contorno do marcador
+                                                   markeredgewidth=0.8,
+                                                   markersize=6,             # Tamanho da bolinha
+                                                   zorder=3)
                 
                 if self.opt_bussolas:
                     set_bussola('cp_d', ca_cp_d[i])
