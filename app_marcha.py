@@ -319,30 +319,28 @@ class ProcessadorCinematico:
 # MÓDULO VISUAL (GIFs) 
 # =============================================================================
 class GeradorVisual:
-    def __init__(self, processador, nome_original):
+    def __init__(self, processador, nome_original, opt_bussolas=False, opt_ang=False, opt_aa=False, opt_ca=False):
         self.proc = processador
         self.nome_arq = nome_original
-        # Limites do box 3D (ajustáveis conforme o tamanho da sua sala de captura)
         self.box = {'x': (-1000, 1000), 'y': (-1000, 1000), 'z': (0, 2000)}
+        
+        # Opções ativadas pelo usuário
+        self.opt_bussolas = opt_bussolas
+        self.opt_ang = opt_ang
+        self.opt_aa = opt_aa
+        self.opt_ca = opt_ca
 
     def _get_f(self, n, f):
-        try:
-            return self.proc._get(n, f)
-        except Exception:
-            return None
+        try: return self.proc._get(n, f)
+        except Exception: return None
     
     def _mid_f(self, n1, n2, f):
-        p1 = self._get_f(n1, f)
-        p2 = self._get_f(n2, f)
+        p1 = self._get_f(n1, f); p2 = self._get_f(n2, f)
         if p1 is not None and p2 is not None: return (p1 + p2) / 2
-        if p1 is not None: return p1
-        if p2 is not None: return p2
-        return None
+        return p1 if p1 is not None else p2
 
     def montar_frame(self, f):
         s = {}
-        
-        # --- PELVE ---
         rias = self._get_f('RIAS', f) or self._get_f('RASI', f)
         lias = self._get_f('LIAS', f) or self._get_f('LASI', f)
         rips = self._get_f('RIPS', f) or self._get_f('RPSI', f)
@@ -353,104 +351,193 @@ class GeradorVisual:
         if rias is not None and rips is not None: s['Pelve_Dir'] = [rias, rips]
         if lias is not None and lips is not None: s['Pelve_Esq'] = [lias, lips]
         
-        # Ponto âncora do quadril (Simplificado: ASIS ou PSIS)
         quad_d = rias if rias is not None else rips
         quad_e = lias if lias is not None else lips
 
-        # --- JOELHOS ---
         kd = self._mid_f('RLE', 'RME', f) or self._get_f('RLE', f) or self._get_f('RKN', f)
         ke = self._mid_f('LLE', 'LME', f) or self._get_f('LLE', f) or self._get_f('LKN', f)
-
-        # --- TORNOZELOS ---
         td = self._mid_f('RML', 'RMM', f) or self._get_f('RML', f) or self._get_f('RANK', f)
         te = self._mid_f('LML', 'LMM', f) or self._get_f('LML', f) or self._get_f('LANK', f)
 
-        # Segmentos da Coxa
         if quad_d is not None and kd is not None: s['Coxa_D'] = [quad_d, kd]
         if quad_e is not None and ke is not None: s['Coxa_E'] = [quad_e, ke]
-
-        # Segmentos da Perna
         if kd is not None and td is not None: s['Perna_D'] = [kd, td]
         if ke is not None and te is not None: s['Perna_E'] = [ke, te]
 
-        # --- PÉS ---
-        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f)
-        h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
-        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f)
-        t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
+        h_d = self._get_f('RCAL', f) or self._get_f('RHEE', f); h_e = self._get_f('LCAL', f) or self._get_f('LHEE', f)
+        t_d = self._get_f('RFT1', f) or self._get_f('RTOE', f); t_e = self._get_f('LFT1', f) or self._get_f('LTOE', f)
 
         if td is not None and h_d is not None: s['Pe_Calcanhar_D'] = [td, h_d]
         if td is not None and t_d is not None: s['Pe_Ponta_D'] = [td, t_d]
         if h_d is not None and t_d is not None: s['Pe_Sola_D'] = [h_d, t_d]
-
         if te is not None and h_e is not None: s['Pe_Calcanhar_E'] = [te, h_e]
         if te is not None and t_e is not None: s['Pe_Ponta_E'] = [te, t_e]
         if h_e is not None and t_e is not None: s['Pe_Sola_E'] = [h_e, t_e]
-
         return s
 
+    def _desenhar_bussola(self, ax_c, titulo):
+        ax_c.set_xlim(-1.2, 1.2); ax_c.set_ylim(-1.4, 1.4); ax_c.axis('off'); ax_c.set_aspect('equal')
+        ax_c.text(0, 1.35, titulo, ha='center', va='center', fontsize=9, fontweight='bold')
+        txt = ax_c.text(0, -1.35, "-", ha='center', va='center', fontsize=10, fontweight='bold')
+        categorias = [((0, 22.5), '#e74c3c'), ((337.5, 360), '#e74c3c'), ((157.5, 202.5), '#e74c3c'),
+                      ((22.5, 67.5), '#2ecc71'), ((202.5, 247.5), '#2ecc71'),
+                      ((67.5, 112.5), '#3498db'), ((247.5, 292.5), '#3498db'),
+                      ((112.5, 157.5), '#f1c40f'), ((292.5, 337.5), '#f1c40f')]
+        for (t1, t2), cor in categorias: 
+            ax_c.add_patch(mpatches.Wedge((0,0), 1.0, t1, t2, facecolor=cor, alpha=0.35, edgecolor='white', lw=1))
+        ax_c.plot([0], [0], marker='o', color='black', markersize=4)
+        ptr, = ax_c.plot([], [], color='black', lw=2.5)
+        return ptr, txt
+
+    def _classificar_angulo(self, angulo):
+        if np.isnan(angulo): return "-", "gray"
+        a = angulo % 360
+        if (0 <= a < 22.5) or (337.5 <= a <= 360) or (157.5 <= a < 202.5): return "PROXIMAL", '#e74c3c'
+        elif (22.5 <= a < 67.5) or (202.5 <= a < 247.5): return "EM FASE", '#2ecc71'
+        elif (67.5 <= a < 112.5) or (247.5 <= a < 292.5): return "DISTAL", '#3498db'
+        else: return "ANTI-FASE", '#f1c40f'
+
     def salvar(self, caminho_final, step=3, fps_anim=20):
-        # Varredura bruta baseada unicamente na quantidade de frames que o C3D informou
         total_frames = self.proc.n_frames
-        
-        if total_frames < 2:
-            return False, "O arquivo possui poucos frames para gerar uma animação."
+        if total_frames < 2: return False, "Frames insuficientes."
 
-        # Configuração do gráfico único
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        # Cálculos Cinemáticos Brutos (Pré-processados para todo o GIF de uma vez)
+        cx_d = self.proc.segmentos_df['Coxa_D'].values[:total_frames]
+        pn_d = self.proc.segmentos_df['Perna_D'].values[:total_frames]
+        pe_d = self.proc.segmentos_df['Pe_D'].values[:total_frames]
+        cx_e = self.proc.segmentos_df['Coxa_E'].values[:total_frames]
+        pn_e = self.proc.segmentos_df['Perna_E'].values[:total_frames]
+        pe_e = self.proc.segmentos_df['Pe_E'].values[:total_frames]
         
-        ax.set_xlim(self.box['x'])
-        ax.set_ylim(self.box['y'])
-        ax.set_zlim(self.box['z'])
-        ax.view_init(elev=20, azim=135)
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.set_title(self.nome_arq, fontsize=12)
+        ca_cp_d = np.mod(np.degrees(np.arctan2(-np.diff(pn_d), -np.diff(cx_d))), 360)
+        ca_cp_d = np.append(ca_cp_d, ca_cp_d[-1] if len(ca_cp_d) > 0 else 0)
+        ca_pp_d = np.mod(np.degrees(np.arctan2(-np.diff(pe_d), -np.diff(pn_d))), 360)
+        ca_pp_d = np.append(ca_pp_d, ca_pp_d[-1] if len(ca_pp_d) > 0 else 0)
+        ca_cp_e = np.mod(np.degrees(np.arctan2(-np.diff(pn_e), -np.diff(cx_e))), 360)
+        ca_cp_e = np.append(ca_cp_e, ca_cp_e[-1] if len(ca_cp_e) > 0 else 0)
+        ca_pp_e = np.mod(np.degrees(np.arctan2(-np.diff(pe_e), -np.diff(pn_e))), 360)
+        ca_pp_e = np.append(ca_pp_e, ca_pp_e[-1] if len(ca_pp_e) > 0 else 0)
 
-        linhas = {}
+        # ---------------------------------------------------------------------
+        # LÓGICA DE GRID MODULAR (Calcula a largura da imagem baseado nas opções)
+        # ---------------------------------------------------------------------
+        largura_base = 8
+        ratios = []
+        if self.opt_bussolas: ratios.append(1); largura_base += 3
+        ratios.append(2) # Proporção do Box 3D
+        
+        opcoes_direita = sum([self.opt_ang, self.opt_aa, self.opt_ca])
+        if opcoes_direita > 0: ratios.append(1.5); largura_base += 6
+
+        fig = plt.figure(figsize=(largura_base, 8))
+        gs_main = fig.add_gridspec(1, len(ratios), width_ratios=ratios)
+        idx_grid = 0
+        elementos_dinamicos = []
+
+        # 1. PAINEL ESQUERDO (Bússolas)
+        if self.opt_bussolas:
+            gs_left = gs_main[0, idx_grid].subgridspec(2, 2, hspace=0.1, wspace=0.1)
+            ax_cp_d = fig.add_subplot(gs_left[0, 0]); ax_cp_e = fig.add_subplot(gs_left[0, 1])
+            ax_pp_d = fig.add_subplot(gs_left[1, 0]); ax_pp_e = fig.add_subplot(gs_left[1, 1])
+            
+            ptr_cp_d, txt_cp_d = self._desenhar_bussola(ax_cp_d, "Coxa-Perna\n(DIR)")
+            ptr_cp_e, txt_cp_e = self._desenhar_bussola(ax_cp_e, "Coxa-Perna\n(ESQ)")
+            ptr_pp_d, txt_pp_d = self._desenhar_bussola(ax_pp_d, "Perna-Pé\n(DIR)")
+            ptr_pp_e, txt_pp_e = self._desenhar_bussola(ax_pp_e, "Perna-Pé\n(ESQ)")
+            
+            elementos_dinamicos.extend([ptr_cp_d, txt_cp_d, ptr_cp_e, txt_cp_e, ptr_pp_d, txt_pp_d, ptr_pp_e, txt_pp_e])
+            idx_grid += 1
+
+        # 2. PAINEL CENTRAL (Modelo 3D)
+        ax_3d = fig.add_subplot(gs_main[0, idx_grid], projection='3d')
+        ax_3d.set_xlim(self.box['x']); ax_3d.set_ylim(self.box['y']); ax_3d.set_zlim(self.box['z'])
+        ax_3d.view_init(elev=20, azim=135); ax_3d.set_xlabel('X'); ax_3d.set_ylabel('Y'); ax_3d.set_zlabel('Z')
+        ax_3d.set_title(self.nome_arq, fontsize=12)
+        idx_grid += 1
+
+        # 3. PAINEL DIREITO (Gráficos)
+        x_frames = np.arange(total_frames)
+        dots_direita = {} # Dicionário para atualizar as bolinhas vermelhas depois
+        
+        if opcoes_direita > 0:
+            gs_right = gs_main[0, idx_grid].subgridspec(opcoes_direita, 1, hspace=0.4)
+            r_idx = 0
+
+            if self.opt_ang:
+                gs_ang = gs_right[r_idx, 0].subgridspec(1, 3, wspace=0.3)
+                ax_c = fig.add_subplot(gs_ang[0, 0]); ax_c.plot(x_frames, cx_d, 'k-', alpha=0.5); ax_c.set_title("Coxa (°)", fontsize=9); ax_c.set_xticks([])
+                ax_p = fig.add_subplot(gs_ang[0, 1]); ax_p.plot(x_frames, pn_d, 'k-', alpha=0.5); ax_p.set_title("Perna (°)", fontsize=9); ax_p.set_xticks([])
+                ax_f = fig.add_subplot(gs_ang[0, 2]); ax_f.plot(x_frames, pe_d, 'k-', alpha=0.5); ax_f.set_title("Pé (°)", fontsize=9); ax_f.set_xticks([])
+                dots_direita['ang_c'], = ax_c.plot([], [], 'ro', markersize=6)
+                dots_direita['ang_p'], = ax_p.plot([], [], 'ro', markersize=6)
+                dots_direita['ang_f'], = ax_f.plot([], [], 'ro', markersize=6)
+                r_idx += 1
+
+            if self.opt_aa:
+                gs_aa = gs_right[r_idx, 0].subgridspec(1, 2, wspace=0.3)
+                ax_aa_cp = fig.add_subplot(gs_aa[0, 0]); ax_aa_cp.plot(cx_d, pn_d, 'k-', alpha=0.5); ax_aa_cp.set_title("Angle-Angle\nCoxa-Perna", fontsize=9)
+                ax_aa_pp = fig.add_subplot(gs_aa[0, 1]); ax_aa_pp.plot(pn_d, pe_d, 'k-', alpha=0.5); ax_aa_pp.set_title("Angle-Angle\nPerna-Pé", fontsize=9)
+                dots_direita['aa_cp'], = ax_aa_cp.plot([], [], 'ro', markersize=6)
+                dots_direita['aa_pp'], = ax_aa_pp.plot([], [], 'ro', markersize=6)
+                r_idx += 1
+
+            if self.opt_ca:
+                gs_ca = gs_right[r_idx, 0].subgridspec(1, 2, wspace=0.3)
+                ax_ca_cp = fig.add_subplot(gs_ca[0, 0]); ax_ca_cp.plot(x_frames, ca_cp_d, 'k-', alpha=0.5); ax_ca_cp.set_ylim(0,360); ax_ca_cp.set_yticks([0,180,360]); ax_ca_cp.set_title("Coupling Angle\nCoxa-Perna (°)", fontsize=9); ax_ca_cp.set_xticks([])
+                ax_ca_pp = fig.add_subplot(gs_ca[0, 1]); ax_ca_pp.plot(x_frames, ca_pp_d, 'k-', alpha=0.5); ax_ca_pp.set_ylim(0,360); ax_ca_pp.set_yticks([0,180,360]); ax_ca_pp.set_title("Coupling Angle\nPerna-Pé (°)", fontsize=9); ax_ca_pp.set_xticks([])
+                dots_direita['ca_cp'], = ax_ca_cp.plot([], [], 'ro', markersize=6)
+                dots_direita['ca_pp'], = ax_ca_pp.plot([], [], 'ro', markersize=6)
+
+            elementos_dinamicos.extend(list(dots_direita.values()))
+
+        linhas_3d = {}
 
         def update(i_frame):
-            # Obtém os segmentos detectados apenas para o frame atual
+            # 1. Atualizar Segmentos 3D Invertendo X
             seg = self.montar_frame(i_frame)
+            for k in list(linhas_3d):
+                if k not in seg: linhas_3d[k].remove(); del linhas_3d[k]
             
-            # Limpa as linhas antigas que sumiram (caso haja oclusão de marcador)
-            for k in list(linhas):
-                if k not in seg:
-                    linhas[k].remove()
-                    del linhas[k]
-            
-            # Atualiza coordenadas ou cria as linhas do modelo
             for n, (p1, p2) in seg.items():
                 c = 'red' if '_D' in n else ('blue' if '_E' in n else 'black')
+                x_plot = [-p1[0], -p2[0]]; y_plot = [p1[1], p2[1]]; z_plot = [p1[2], p2[2]]
                 
-                # INVERSÃO NO EIXO X: Garante que a marcha aconteça para a frente no box
-                x_plot = [-p1[0], -p2[0]] 
-                y_plot = [p1[1], p2[1]]
-                z_plot = [p1[2], p2[2]]
-                
-                if n in linhas:
-                    linhas[n].set_data(x_plot, y_plot)
-                    linhas[n].set_3d_properties(z_plot)
+                if n in linhas_3d:
+                    linhas_3d[n].set_data(x_plot, y_plot); linhas_3d[n].set_3d_properties(z_plot)
                 else: 
-                    linhas[n], = ax.plot(x_plot, y_plot, z_plot, c=c, lw=2.5)
+                    linhas_3d[n], = ax_3d.plot(x_plot, y_plot, z_plot, c=c, lw=2.5)
+            
+            # 2. Atualizar Bússolas
+            if self.opt_bussolas:
+                angulos = [ca_cp_d[i_frame], ca_cp_e[i_frame], ca_pp_d[i_frame], ca_pp_e[i_frame]]
+                ptrs = [ptr_cp_d, ptr_cp_e, ptr_pp_d, ptr_pp_e]
+                txts = [txt_cp_d, txt_cp_e, txt_pp_d, txt_pp_e]
+                
+                for ang, ptr, txt in zip(angulos, ptrs, txts):
+                    ptr.set_data([0, np.cos(np.radians(ang))], [0, np.sin(np.radians(ang))])
+                    lbl, cor = self._classificar_angulo(ang)
+                    txt.set_text(lbl); txt.set_color(cor)
 
-            return list(linhas.values())
+            # 3. Atualizar Rastreadores Direitos (Bolinhas Vermelhas)
+            if self.opt_ang:
+                dots_direita['ang_c'].set_data([i_frame], [cx_d[i_frame]])
+                dots_direita['ang_p'].set_data([i_frame], [pn_d[i_frame]])
+                dots_direita['ang_f'].set_data([i_frame], [pe_d[i_frame]])
+            if self.opt_aa:
+                dots_direita['aa_cp'].set_data([cx_d[i_frame]], [pn_d[i_frame]])
+                dots_direita['aa_pp'].set_data([pn_d[i_frame]], [pe_d[i_frame]])
+            if self.opt_ca:
+                dots_direita['ca_cp'].set_data([i_frame], [ca_cp_d[i_frame]])
+                dots_direita['ca_pp'].set_data([i_frame], [ca_pp_d[i_frame]])
 
-        # Animação iterando sobre a lista bruta de inteiros
-        ani = animation.FuncAnimation(
-            fig, update, frames=range(0, total_frames, step), interval=50, blit=False
-        )
-        
+            return list(linhas_3d.values()) + elementos_dinamicos
+
+        ani = animation.FuncAnimation(fig, update, frames=range(0, total_frames, step), interval=50, blit=False)
         try:
             ani.save(caminho_final, writer='pillow', fps=fps_anim)
             return True, caminho_final
-        except Exception as e: 
-            return False, f"Erro ao renderizar GIF: {str(e)}"
-        finally: 
-            plt.close(fig)
-            plt.close('all')
+        except Exception as e: return False, f"Erro: {str(e)}"
+        finally: plt.close(fig); plt.close('all')
 # =============================================================================
 # INTERFACE WEB STREAMLIT
 # =============================================================================
@@ -1119,23 +1206,38 @@ if st.session_state.processadores:
             fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"); st.pyplot(fig5); plt.close(fig5)
 
     with tab_anim:
-        st.subheader("Gerador de GIFs e Biofeedback Visual")
-        st.info("Escolha os arquivos que deseja animar e a velocidade de reprodução.")
+        st.subheader("Gerador de GIFs Modulares e Biofeedback Visual")
+        st.info("Escolha os arquivos e ative as análises em tempo real que deseja adicionar ao redor do modelo 3D.")
+        
         lista_nomes = [p.nome_arq for p in st.session_state.processadores]
         col_selecao, col_vel = st.columns([2, 1])
         with col_selecao: selecionados = st.multiselect("Selecione os arquivos para animar:", lista_nomes)
         with col_vel: vel_opcao = st.radio("Velocidade de Reprodução:", ["100% (Normal)", "75% (Lenta)", "50% (Muito Lenta)"])
         fps_escolhido = {"100% (Normal)": 20, "75% (Lenta)": 15, "50% (Muito Lenta)": 10}[vel_opcao]
         
+        st.markdown("---")
+        st.markdown("**Opções de Biofeedback em Tempo Real (Adicionados ao GIF):**")
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            opt_bussolas = st.checkbox("🧭 Bússolas de Coordenação Vetorial (Membro Dir/Esq) - À Esquerda")
+        with col_opt2:
+            opt_ang = st.checkbox("📈 Ângulos Segmentares (Membro Direito) - À Direita")
+            opt_aa = st.checkbox("🔄 Diagramas Angle-Angle (Membro Direito) - À Direita")
+            opt_ca = st.checkbox("🔗 Coupling Angle Série Temporal (Membro Direito) - À Direita")
+
+        st.markdown("---")
         if st.button("Gerar GIFs Selecionados", type="primary"):
             for p in st.session_state.processadores:
                 if p.nome_arq in selecionados:
-                    with st.spinner(f"Processando animação ({vel_opcao}) para: {p.nome_arq}..."):
+                    with st.spinner(f"Processando animação modular para: {p.nome_arq}..."):
                         fd, tmp_gif_path = tempfile.mkstemp(suffix='.gif'); os.close(fd) 
-                        viz = GeradorVisual(p, p.nome_arq)
+                        viz = GeradorVisual(
+                            p, p.nome_arq, 
+                            opt_bussolas=opt_bussolas, opt_ang=opt_ang, opt_aa=opt_aa, opt_ca=opt_ca
+                        )
                         sucesso, msg = viz.salvar(tmp_gif_path, step=3, fps_anim=fps_escolhido)
                         if sucesso:
-                            st.image(tmp_gif_path, caption=f"Análise 3D: {p.nome_arq}", use_container_width=True)
+                            st.image(tmp_gif_path, use_container_width=True)
                             with open(tmp_gif_path, "rb") as file_gif: st.download_button(f"📥 Baixar GIF", data=file_gif, file_name=f"{p.nome_arq.split('.')[0]}_3D.gif", mime="image/gif")
                         else: st.error(f"Falha: {msg}")
 
