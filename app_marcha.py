@@ -286,11 +286,9 @@ class ProcessadorCinematico:
                 
                 for prox_norm, dist_norm in zip(prox_norm_list, dist_norm_list):
                     dx, dy = -np.diff(prox_norm), -np.diff(dist_norm)
-                    comp_vetor = np.sqrt(dx**2 + dy**2)
                     
+                    # CÁLCULO ANGULAR BRUTO (Sem limiar de ruído)
                     ca_norm = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
-                    # Filtro de Singularidade (Ignora cálculo angular em ruído/imobilidade < 0.3 graus)
-                    ca_norm[comp_vetor < 0.3] = np.nan 
                     ca_norm = np.append(ca_norm, ca_norm[-1] if not np.isnan(ca_norm[-1]) else np.nan) 
                     cas.append(ca_norm)
                     
@@ -418,14 +416,15 @@ class GeradorVisual:
         pn_e = self.proc.segmentos_df['Perna_E'].values[:total_frames]
         pe_e = self.proc.segmentos_df['Pe_E'].values[:total_frames]
         
-        def calc_ca_filtrado(proximal, distal, limiar_ruido=0.5):
+        def calc_ca_filtrado(proximal, distal):
             dx = -np.diff(proximal)
             dy = -np.diff(distal)
-            comprimento = np.sqrt(dx**2 + dy**2)
+            
+            # CÁLCULO ANGULAR BRUTO (Sem limiar de ruído)
             ca = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
-            ca[comprimento < limiar_ruido] = np.nan
             ca = np.append(ca, ca[-1] if len(ca) > 0 else np.nan)
             
+            # FILTRO GRÁFICO (Wrap-Around)
             ca_plot = ca.copy()
             with np.errstate(invalid='ignore'): saltos = np.abs(np.diff(ca)) > 180
             ca_plot[1:][saltos] = np.nan 
@@ -560,17 +559,15 @@ def limpar_wrap_around(curva_array):
     plot_arr[1:][saltos] = np.nan
     return plot_arr
 
-def calcular_ca_serie(prox_raw, dist_raw, p_obj, hss, tos=None, limiar=0.3):
-    """ Calcula Vector Coding normalizado com filtro de ruído de movimento """
+def calcular_ca_serie(prox_raw, dist_raw, p_obj, hss, tos=None):
+    """ Calcula Vector Coding normalizado (Cálculo Angular Bruto) """
     prox_norm_list = p_obj.extrair_ciclos_normalizados(prox_raw, hss, tos)
     dist_norm_list = p_obj.extrair_ciclos_normalizados(dist_raw, hss, tos)
     
     cas = []
     for p_n, d_n in zip(prox_norm_list, dist_norm_list):
         dx, dy = -np.diff(p_n), -np.diff(d_n)
-        comp = np.sqrt(dx**2 + dy**2)
         ca_norm = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
-        ca_norm[comp < limiar] = np.nan # Limpa ruidos
         ca_norm = np.append(ca_norm, ca_norm[-1] if not np.isnan(ca_norm[-1]) else np.nan)
         cas.append(ca_norm)
     return cas
@@ -920,7 +917,6 @@ if st.session_state.processadores:
 
                     axF = plt.subplot2grid((3, 6), (2, 0), colspan=3); axG = plt.subplot2grid((3, 6), (2, 3), colspan=3)
                     
-                    # Usa o filtro gráfico limpar_wrap_around para evitar o pico visual 0-360
                     axF.plot(x_perc, limpar_wrap_around(ca_cp), 'k-', lw=1.2); axF.set_title('F', loc='left', fontweight='bold'); axF.set_xlabel('% Cycle'); axF.set_ylabel('Thigh-shank coupling angle (°)')
                     axF.set_ylim(0, 360); axF.set_yticks([0, 180, 360])
                     
@@ -1016,7 +1012,6 @@ if st.session_state.processadores:
                     ax.set_ylabel(titulo); ax.set_xlabel("% Cycle")
                     ax.set_ylim(0, 360); ax.set_yticks([0, 180, 360])
                     ciclos = dados_curvas[grp_ctrl][tipo][f"{par}_D"] + dados_curvas[grp_ctrl][tipo][f"{par}_E"]
-                    # Aplica a limpeza de saltos antes de plotar
                     if ciclos: ax.plot(x_tempo, limpar_wrap_around(media_circular(ciclos)), color='black', lw=1.5)
                 plt.tight_layout(); st.pyplot(fig_ca_ctrl); plt.close(fig_ca_ctrl)
 
@@ -1104,7 +1099,6 @@ if st.session_state.processadores:
                         if fase == "Apoio": fatia = serie_completa[:idx_apoio]
                         else: fatia = serie_completa[idx_apoio:]
                             
-                        # Remove ruídos contabilizados da frequência
                         fatia = [x for x in fatia if x != 'Ruido']
                         total = len(fatia)
                         if total > 0:
