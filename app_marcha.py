@@ -1333,3 +1333,52 @@ if st.session_state.processadores:
                 mime="text/csv",
                 type="primary"
             )
+            
+            st.markdown("---")
+            st.subheader("📊 Tabela de Médias Bilaterais")
+            st.markdown("Dados espaço-temporais e de coordenação segmentar (Coxa-Perna e Perna-Pé) agrupados pela média entre os membros direito e esquerdo.")
+
+            # Inicializa o novo DataFrame com as colunas base
+            df_bilateral = pd.DataFrame()
+            df_bilateral['ID_Paciente'] = df_media_paciente['ID_Paciente']
+            df_bilateral['Grupo'] = df_media_paciente['Grupo']
+            df_bilateral['Velocidade (m/s)'] = df_media_paciente['Velocidade (m/s)']
+
+            # 1. Agrupamento Espaço-Temporal
+            df_bilateral['Apoio Médio (%)'] = df_media_paciente[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
+            df_bilateral['Clearance Médio (mm)'] = df_media_paciente[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
+            df_bilateral['Passo Médio (mm)'] = df_media_paciente[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
+            
+            # Tratamento seguro caso a planilha antropométrica não tenha sido carregada
+            if 'Passo DIR (% Altura)' in df_media_paciente.columns and 'Passo ESQ (% Altura)' in df_media_paciente.columns:
+                df_bilateral['Passo Médio (% Altura)'] = df_media_paciente[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
+
+            # 2. Agrupamento da Coordenação Segmentar (Vector Coding)
+            modos = ['Proximal (%)', 'EmFase (%)', 'Distal (%)', 'AntiFase (%)']
+            pares_segmentares = ['Coxa_Perna', 'Perna_Pe']
+
+            for par in pares_segmentares:
+                for modo in modos:
+                    col_d = f'CAV {par}_D - {modo}'
+                    col_e = f'CAV {par}_E - {modo}'
+                    col_media = f'CAV {par} Médio - {modo}'
+                    
+                    # Verifica se as colunas foram devidamente extraídas na tabela anterior
+                    if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
+                        df_bilateral[col_media] = df_media_paciente[[col_d, col_e]].mean(axis=1)
+
+            # Arredondamento
+            df_bilateral = df_bilateral.round(2)
+
+            # Exibição
+            st.dataframe(df_bilateral, use_container_width=True, hide_index=True)
+
+            # Exportação CSV
+            csv_export_bilateral = df_bilateral.to_csv(index=False, sep=';', decimal=',')
+            st.download_button(
+                label="📥 Baixar Tabela Bilateral (CSV)",
+                data=csv_export_bilateral,
+                file_name="GPBIO_Resultados_Bilaterais.csv",
+                mime="text/csv",
+                type="secondary" # Usando estilo secundário para diferenciar do botão principal
+            )
