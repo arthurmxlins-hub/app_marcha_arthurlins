@@ -1335,50 +1335,78 @@ if st.session_state.processadores:
             )
             
             st.markdown("---")
-            st.subheader("📊 Tabela de Médias Bilaterais")
-            st.markdown("Dados espaço-temporais e de coordenação segmentar (Coxa-Perna e Perna-Pé) agrupados pela média entre os membros direito e esquerdo.")
+            st.subheader("📊 Tabela de Médias Bilaterais (Formato de Exportação)")
+            st.markdown("Dados espaço-temporais e de coordenação segmentar agrupados pela média entre os membros (Direito/Esquerdo), formatados para exportação.")
 
-            # Inicializa o novo DataFrame com as colunas base
             df_bilateral = pd.DataFrame()
-            df_bilateral['ID_Paciente'] = df_media_paciente['ID_Paciente']
+            
+            # Identificação Básica
             df_bilateral['Grupo'] = df_media_paciente['Grupo']
+            df_bilateral['ID_Paciente'] = df_media_paciente['ID_Paciente']
             df_bilateral['Velocidade (m/s)'] = df_media_paciente['Velocidade (m/s)']
 
-            # 1. Agrupamento Espaço-Temporal
-            df_bilateral['Apoio Médio (%)'] = df_media_paciente[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
-            df_bilateral['Clearance Médio (mm)'] = df_media_paciente[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
-            df_bilateral['Passo Médio (mm)'] = df_media_paciente[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
+            # Agrupamento Espaço-Temporal
+            if 'Apoio DIR (%)' in df_media_paciente.columns and 'Apoio ESQ (%)' in df_media_paciente.columns:
+                df_bilateral['Apoio Bilat (%)'] = df_media_paciente[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
             
-            # Tratamento seguro caso a planilha antropométrica não tenha sido carregada
+            if 'Clearance DIR (mm)' in df_media_paciente.columns and 'Clearance ESQ (mm)' in df_media_paciente.columns:
+                df_bilateral['Clearance Bilat (mm)'] = df_media_paciente[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
+            
+            if 'Passo DIR (mm)' in df_media_paciente.columns and 'Passo ESQ (mm)' in df_media_paciente.columns:
+                df_bilateral['Passo Bilat (mm)'] = df_media_paciente[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
+            
             if 'Passo DIR (% Altura)' in df_media_paciente.columns and 'Passo ESQ (% Altura)' in df_media_paciente.columns:
-                df_bilateral['Passo Médio (% Altura)'] = df_media_paciente[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
+                df_bilateral['Passo Norm Bilat (%)'] = df_media_paciente[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
+            else:
+                df_bilateral['Passo Norm Bilat (%)'] = np.nan
 
-            # 2. Agrupamento da Coordenação Segmentar (Vector Coding)
+            # Mapeamento do Vector Coding Segmentar (Média Bilateral)
+            pares_vc = [
+                ('Segm_CP', 'Coxa-Perna', 'CP'),
+                ('Segm_PP', 'Perna-Pé', 'PP')
+            ]
+            
             modos = ['Proximal (%)', 'EmFase (%)', 'Distal (%)', 'AntiFase (%)']
-            pares_segmentares = ['Coxa_Perna', 'Perna_Pe']
 
-            for par in pares_segmentares:
-                for modo in modos:
-                    col_d = f'CAV {par}_D - {modo}'
-                    col_e = f'CAV {par}_E - {modo}'
-                    col_media = f'CAV {par} Médio - {modo}'
-                    
-                    # Verifica se as colunas foram devidamente extraídas na tabela anterior
-                    if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
-                        df_bilateral[col_media] = df_media_paciente[[col_d, col_e]].mean(axis=1)
+            for original, nome_art, sigla in pares_vc:
+                # 1. CAV Bruto (Acoplamento Vetorial Médio)
+                col_cav_d = f'CAV {original}_DIR (°)'
+                col_cav_e = f'CAV {original}_ESQ (°)'
+                if col_cav_d in df_media_paciente.columns and col_cav_e in df_media_paciente.columns:
+                    df_bilateral[f'CAV {nome_art} Bilat (°)'] = df_media_paciente[[col_cav_d, col_cav_e]].mean(axis=1)
+                else:
+                    df_bilateral[f'CAV {nome_art} Bilat (°)'] = np.nan
 
-            # Arredondamento
+                # 2. Transições
+                col_trans_d = f'Transições {original}_DIR'
+                col_trans_e = f'Transições {original}_ESQ'
+                if col_trans_d in df_media_paciente.columns and col_trans_e in df_media_paciente.columns:
+                    df_bilateral[f'Transições {nome_art} Bilat'] = df_media_paciente[[col_trans_d, col_trans_e]].mean(axis=1)
+                else:
+                    df_bilateral[f'Transições {nome_art} Bilat'] = np.nan
+
+                # 3. Frequências Modais (Apoio e Balanço)
+                for fase_orig, fase_nova in [('APOIO', 'Apoio'), ('BALANÇO', 'Balanço')]:
+                    for modo in modos:
+                        col_d = f'{fase_orig} {original}_DIR - {modo}'
+                        col_e = f'{fase_orig} {original}_ESQ - {modo}'
+                        col_nova = f'{fase_nova} {sigla} Bilat - {modo}'
+                        
+                        if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
+                            df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
+                        else:
+                            df_bilateral[col_nova] = np.nan
+
+            # Arredondamento e formatação final
             df_bilateral = df_bilateral.round(2)
 
-            # Exibição
             st.dataframe(df_bilateral, use_container_width=True, hide_index=True)
 
-            # Exportação CSV
             csv_export_bilateral = df_bilateral.to_csv(index=False, sep=';', decimal=',')
             st.download_button(
-                label="📥 Baixar Tabela Bilateral (CSV)",
+                label="📥 Baixar Tabela Bilateral de Exportação (CSV)",
                 data=csv_export_bilateral,
-                file_name="GPBIO_Resultados_Bilaterais.csv",
+                file_name="GPBIO_Resultados_Bilaterais_Export.csv",
                 mime="text/csv",
-                type="secondary" # Usando estilo secundário para diferenciar do botão principal
+                type="secondary"
             )
