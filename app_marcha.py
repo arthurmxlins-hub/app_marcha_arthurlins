@@ -261,7 +261,10 @@ class ProcessadorCinematico:
         return ciclos
 
     def _calcular_coordenacao_vetorial(self):
-        res = {}; self.coord_vetorial_series = {} 
+        res = {}; 
+        self.coord_vetorial_series = {} 
+        self.coord_vetorial_cav = {} ### NOVO: Dicionário nativo para armazenar o CAV contínuo
+        
         for lado in ['D', 'E']:
             hss = self.eventos[lado]['HS']
             tos = self.eventos[lado]['TO']
@@ -286,8 +289,6 @@ class ProcessadorCinematico:
                 
                 for prox_norm, dist_norm in zip(prox_norm_list, dist_norm_list):
                     dx, dy = -np.diff(prox_norm), -np.diff(dist_norm)
-                    
-                    # CÁLCULO ANGULAR BRUTO (Sem limiar de ruído)
                     ca_norm = np.mod(np.degrees(np.arctan2(dy, dx)), 360)
                     ca_norm = np.append(ca_norm, ca_norm[-1] if not np.isnan(ca_norm[-1]) else np.nan) 
                     cas.append(ca_norm)
@@ -314,6 +315,11 @@ class ProcessadorCinematico:
                 s_m = np.nanmean(np.sin(rad_cas), axis=0)
                 c_m = np.nanmean(np.cos(rad_cas), axis=0)
                 ang_m = np.mod(np.degrees(np.arctan2(s_m, c_m)), 360)
+                
+                ### NOVO: Aproveitamos o s_m e c_m que já foram processados! Cálculo muito mais rápido.
+                R = np.clip(np.sqrt(s_m**2 + c_m**2), 1e-10, 1.0) 
+                self.coord_vetorial_cav[nome_par] = np.degrees(np.sqrt(-2 * np.log(R)))
+                ### FIM DO NOVO
                 
                 fatia_media = []
                 for a in ang_m:
@@ -1311,7 +1317,7 @@ if st.session_state.processadores:
                         linha[f'{seg} Delta (°)'] = v_max - v_min
 
                 # -------------------------------------------------------------
-                # EXTRAÇÃO: Vector Coding Segmentar (Apoio vs Balanço)
+                # EXTRAÇÃO: Vector Coding Segmentar (Frequência e Variabilidade - CAV)
                 # -------------------------------------------------------------
                 if hasattr(p, 'coord_vetorial_series') and p.coord_vetorial_series:
                     mapa_pares = {
@@ -1323,31 +1329,31 @@ if st.session_state.processadores:
                     
                     for par_interno, par_exportacao in mapa_pares.items():
                         lado = par_interno.split('_')[-1]
-                        
-                        # Identifica o ponto de corte (Toe-Off) no ciclo de 100%
                         pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
                         idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
                         
+                        # --- 1. Extração de Frequência de Modos ---
                         serie_completa = p.coord_vetorial_series.get(par_interno, [])
-                        
                         if len(serie_completa) > 0:
                             fatias = {
                                 'APOIO': serie_completa[:idx_apoio],
                                 'BALANÇO': serie_completa[idx_apoio:]
                             }
-                            
                             for fase_nome, fatia in fatias.items():
                                 fatia_limpa = [x for x in fatia if x != 'Ruido']
                                 total = len(fatia_limpa)
-                                
                                 for modo in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
                                     col_name = f"{fase_nome} {par_exportacao} - {modo} (%)"
-                                    if total > 0:
-                                        linha[col_name] = (fatia_limpa.count(modo) / total) * 100
-                                    else:
-                                        linha[col_name] = np.nan
+                                    linha[col_name] = (fatia_limpa.count(modo) / total) * 100 if total > 0 else np.nan
 
-                dados_tabela.append(linha)
+                        # --- 2. Extração da Variabilidade (Lendo o CAV pré-calculado) ---
+                        if hasattr(p, 'coord_vetorial_cav') and par_interno in p.coord_vetorial_cav:
+                            cav_continuo = p.coord_vetorial_cav[par_interno]
+                            linha[f'Apoio CAV {par_exportacao} (°)'] = np.nanmean(cav_continuo[:idx_apoio])
+                            linha[f'Balanço CAV {par_exportacao} (°)'] = np.nanmean(cav_continuo[idx_apoio:])
+                        else:
+                            linha[f'Apoio CAV {par_exportacao} (°)'] = np.nan
+                            linha[f'Balanço CAV {par_exportacao} (°)'] = np.nan
 
             # =================================================================
             # DATAFRAME 1: Média por Paciente (Base de Lados Separados)
@@ -1379,7 +1385,7 @@ if st.session_state.processadores:
             df_bilateral['ID_Paciente'] = df_media_paciente['ID_Paciente']
             df_bilateral['Velocidade (m/s)'] = df_media_paciente['Velocidade (m/s)']
 
-            # Cruzamento Espaço-Temporal
+            # --- Cruzamento Espaço-Temporal ---
             cols_espaco_temporais = [
                 ('Apoio Bilat (%)', 'Apoio DIR (%)', 'Apoio ESQ (%)'),
                 ('Clearance Bilat (mm)', 'Clearance DIR (mm)', 'Clearance ESQ (mm)'),
@@ -1391,9 +1397,7 @@ if st.session_state.processadores:
                 if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
                     df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
 
-            # -------------------------------------------------------------
-            # INTEGRALIZAÇÃO: Médias Bilaterais de Deltas (Variação Articular e Segmentar)
-            # -------------------------------------------------------------
+            # --- Integralização das Médias Bilaterais de Deltas ---
             deltas_mapear = [
                 ('Quad Delta Bilat (°)', 'Quad_D Delta (°)', 'Quad_E Delta (°)'),
                 ('Joel Delta Bilat (°)', 'Joel_D Delta (°)', 'Joel_E Delta (°)'),
@@ -1407,7 +1411,7 @@ if st.session_state.processadores:
                 if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
                     df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
 
-            # Mapeamento do Vector Coding Segmentar (Média Bilateral)
+            # --- Cruzamento Vector Coding Segmentar (Frequência) ---
             modos_vc = ['Proximal (%)', 'EmFase (%)', 'Distal (%)', 'AntiFase (%)']
             pares_vc = [('Segm_CP', 'CP'), ('Segm_PP', 'PP')]
 
@@ -1420,6 +1424,16 @@ if st.session_state.processadores:
                         
                         if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
                             df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
+
+            # --- Cruzamento Vector Coding Segmentar (CAV / Variabilidade) ---
+            for original, sigla in pares_vc:
+                for fase_orig in ['Apoio', 'Balanço']:
+                    col_d = f'{fase_orig} CAV {original}_DIR (°)'
+                    col_e = f'{fase_orig} CAV {original}_ESQ (°)'
+                    col_nova = f'{fase_orig} CAV {sigla} Bilat (°)'
+                    
+                    if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
+                        df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
 
             # Ajustes estruturais e exibição final
             df_bilateral = df_bilateral.round(2)
