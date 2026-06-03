@@ -1263,3 +1263,73 @@ if st.session_state.processadores:
         col_box3, col_box4 = st.columns(2)
         with col_box3:
             fig5 = gerar_colunas_passo_norm(dict_ps_norm, "Comprimento do Passo (% Altura)"); st.pyplot(fig5); plt.close(fig5)
+
+
+    with tab_tab:
+        st.subheader("📊 Tabela de Resultados Médios por Participante")
+        st.markdown("Médias das variáveis processadas agrupadas por ID do paciente (desconsiderando a variância entre tentativas individuais).")
+
+        if not st.session_state.processadores:
+            st.info("Nenhum dado processado ainda. Faça o upload dos arquivos C3D para gerar a tabela.")
+        else:
+            dados_tabela = []
+            
+            for p in st.session_state.processadores:
+                # Extração de Métricas Espaço-Temporais e Identificação
+                linha = {
+                    'ID_Paciente': p.id_paciente,
+                    'Grupo': p.grupo,
+                    'Velocidade (m/s)': p.velocidade_media,
+                    'Apoio DIR (%)': p.fases_marcha['D'].get('Apoio', np.nan),
+                    'Apoio ESQ (%)': p.fases_marcha['E'].get('Apoio', np.nan),
+                    'Clearance DIR (mm)': p.foot_clearance.get('D', np.nan),
+                    'Clearance ESQ (mm)': p.foot_clearance.get('E', np.nan),
+                    'Passo DIR (mm)': p.comprimento_passo.get('D', np.nan),
+                    'Passo ESQ (mm)': p.comprimento_passo.get('E', np.nan),
+                    'Passo DIR (% Altura)': p.passo_norm.get('D', np.nan) if hasattr(p, 'passo_norm') else np.nan,
+                    'Passo ESQ (% Altura)': p.passo_norm.get('E', np.nan) if hasattr(p, 'passo_norm') else np.nan
+                }
+
+                # Extração de Estatísticas Articulares Máximas e Mínimas
+                stats = p.obter_stats()
+                if stats:
+                    for art in ['Quad_D', 'Quad_E', 'Joel_D', 'Joel_E', 'Torn_D', 'Torn_E']:
+                        if art in stats:
+                            linha[f'{art} Máx (°)'] = stats[art]['max']
+                            linha[f'{art} Mín (°)'] = stats[art]['min']
+
+                # Extração de Frequências do Vector Coding (Coupling Angle)
+                if hasattr(p, 'coord_vetorial') and p.coord_vetorial:
+                    pares_ca = ['Quad_Joel_D', 'Quad_Joel_E', 'Joel_Torn_D', 'Joel_Torn_E', 
+                                'Coxa_Perna_D', 'Coxa_Perna_E', 'Perna_Pe_D', 'Perna_Pe_E']
+                    for chave_par in pares_ca:
+                        if chave_par in p.coord_vetorial:
+                            cv = p.coord_vetorial[chave_par]
+                            linha[f'CAV {chave_par} - Proximal (%)'] = cv.get('Proximal', np.nan)
+                            linha[f'CAV {chave_par} - EmFase (%)'] = cv.get('EmFase', np.nan)
+                            linha[f'CAV {chave_par} - Distal (%)'] = cv.get('Distal', np.nan)
+                            linha[f'CAV {chave_par} - AntiFase (%)'] = cv.get('AntiFase', np.nan)
+
+                dados_tabela.append(linha)
+
+            # Conversão para DataFrame
+            df_bruto = pd.DataFrame(dados_tabela)
+
+            # Agrupamento lógico por paciente e grupo, calculando a média das tentativas
+            df_media_paciente = df_bruto.groupby(['ID_Paciente', 'Grupo']).mean().reset_index()
+
+            # Arredondamento para adequação visual em publicações e relatórios técnicos
+            df_media_paciente = df_media_paciente.round(2)
+
+            # Exibição no Streamlit
+            st.dataframe(df_media_paciente, use_container_width=True, hide_index=True)
+
+            # Botão de Exportação em formato CSV padronizado (separador ponto e vírgula, decimal vírgula)
+            csv_export = df_media_paciente.to_csv(index=False, sep=';', decimal=',')
+            st.download_button(
+                label="📥 Baixar Tabela de Médias (CSV)",
+                data=csv_export,
+                file_name="GPBIO_Resultados_Medios_Participantes.csv",
+                mime="text/csv",
+                type="primary"
+            )
