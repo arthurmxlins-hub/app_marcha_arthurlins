@@ -1266,16 +1266,14 @@ if st.session_state.processadores:
 
 
     with tab_tab:
-        st.subheader("📊 Tabela de Resultados Médios por Participante")
-        st.markdown("Médias das variáveis processadas agrupadas por ID do paciente (desconsiderando a variância entre tentativas individuais).")
-
+        st.subheader("📊 Tabelas de Resultados Médios e Exportação")
+        
         if not st.session_state.processadores:
             st.info("Nenhum dado processado ainda. Faça o upload dos arquivos C3D para gerar a tabela.")
         else:
             dados_tabela = []
             
             for p in st.session_state.processadores:
-                # Extração de Métricas Espaço-Temporais e Identificação
                 linha = {
                     'ID_Paciente': p.id_paciente,
                     'Grupo': p.grupo,
@@ -1290,102 +1288,84 @@ if st.session_state.processadores:
                     'Passo ESQ (% Altura)': p.passo_norm.get('E', np.nan) if hasattr(p, 'passo_norm') else np.nan
                 }
 
-                # Extração de Estatísticas Articulares Máximas e Mínimas
-                stats = p.obter_stats()
-                if stats:
-                    for art in ['Quad_D', 'Quad_E', 'Joel_D', 'Joel_E', 'Torn_D', 'Torn_E']:
-                        if art in stats:
-                            linha[f'{art} Máx (°)'] = stats[art]['max']
-                            linha[f'{art} Mín (°)'] = stats[art]['min']
-
-                # Extração de Frequências do Vector Coding (Coupling Angle)
-                if hasattr(p, 'coord_vetorial') and p.coord_vetorial:
-                    pares_ca = ['Quad_Joel_D', 'Quad_Joel_E', 'Joel_Torn_D', 'Joel_Torn_E', 
-                                'Coxa_Perna_D', 'Coxa_Perna_E', 'Perna_Pe_D', 'Perna_Pe_E']
-                    for chave_par in pares_ca:
-                        if chave_par in p.coord_vetorial:
-                            cv = p.coord_vetorial[chave_par]
-                            linha[f'CAV {chave_par} - Proximal (%)'] = cv.get('Proximal', np.nan)
-                            linha[f'CAV {chave_par} - EmFase (%)'] = cv.get('EmFase', np.nan)
-                            linha[f'CAV {chave_par} - Distal (%)'] = cv.get('Distal', np.nan)
-                            linha[f'CAV {chave_par} - AntiFase (%)'] = cv.get('AntiFase', np.nan)
+                # -------------------------------------------------------------
+                # EXTRAÇÃO ON-THE-FLY: Vector Coding Segmentar (Apoio vs Balanço)
+                # -------------------------------------------------------------
+                if hasattr(p, 'coord_vetorial_series') and p.coord_vetorial_series:
+                    mapa_pares = {
+                        'Coxa_Perna_D': 'Segm_CP_DIR',
+                        'Coxa_Perna_E': 'Segm_CP_ESQ',
+                        'Perna_Pe_D': 'Segm_PP_DIR',
+                        'Perna_Pe_E': 'Segm_PP_ESQ'
+                    }
+                    
+                    for par_interno, par_exportacao in mapa_pares.items():
+                        lado = par_interno.split('_')[-1]
+                        
+                        # Identifica o ponto de corte (Toe-Off) no ciclo de 100%
+                        pct_apoio = p.fases_marcha.get(lado, {}).get('Apoio', 60.0)
+                        idx_apoio = int(round(pct_apoio)) if not np.isnan(pct_apoio) else 60
+                        
+                        serie_completa = p.coord_vetorial_series.get(par_interno, [])
+                        
+                        if len(serie_completa) > 0:
+                            fatias = {
+                                'APOIO': serie_completa[:idx_apoio],
+                                'BALANÇO': serie_completa[idx_apoio:]
+                            }
+                            
+                            for fase_nome, fatia in fatias.items():
+                                fatia_limpa = [x for x in fatia if x != 'Ruido']
+                                total = len(fatia_limpa)
+                                
+                                for modo in ['Proximal', 'EmFase', 'Distal', 'AntiFase']:
+                                    col_name = f"{fase_nome} {par_exportacao} - {modo} (%)"
+                                    if total > 0:
+                                        linha[col_name] = (fatia_limpa.count(modo) / total) * 100
+                                    else:
+                                        linha[col_name] = np.nan
 
                 dados_tabela.append(linha)
 
-            # Conversão para DataFrame
+            # =================================================================
+            # DATAFRAME 1: Média por Paciente (Base Completa)
+            # =================================================================
             df_bruto = pd.DataFrame(dados_tabela)
-
-            # Agrupamento lógico por paciente e grupo, calculando a média das tentativas
-            df_media_paciente = df_bruto.groupby(['ID_Paciente', 'Grupo']).mean().reset_index()
-
-            # Arredondamento para adequação visual em publicações e relatórios técnicos
+            # Agrupa os sujeitos ignorando a variância entre as tentativas
+            df_media_paciente = df_bruto.groupby(['Grupo', 'ID_Paciente']).mean().reset_index()
             df_media_paciente = df_media_paciente.round(2)
 
-            # Exibição no Streamlit
+            st.markdown("### 1. Dados Base (Médias por Sujeito)")
             st.dataframe(df_media_paciente, use_container_width=True, hide_index=True)
 
-            # Botão de Exportação em formato CSV padronizado (separador ponto e vírgula, decimal vírgula)
-            csv_export = df_media_paciente.to_csv(index=False, sep=';', decimal=',')
-            st.download_button(
-                label="📥 Baixar Tabela de Médias (CSV)",
-                data=csv_export,
-                file_name="GPBIO_Resultados_Medios_Participantes.csv",
-                mime="text/csv",
-                type="primary"
-            )
-            
+            # =================================================================
+            # DATAFRAME 2: Média Bilateral (Formato de Exportação)
+            # =================================================================
             st.markdown("---")
-            st.subheader("📊 Tabela de Médias Bilaterais (Formato de Exportação)")
-            st.markdown("Dados espaço-temporais e de coordenação segmentar agrupados pela média entre os membros (Direito/Esquerdo), formatados para exportação.")
-
-            df_bilateral = pd.DataFrame()
+            st.markdown("### 2. Tabela Bilateral (Exportação Oficial)")
             
-            # Identificação Básica
+            df_bilateral = pd.DataFrame()
             df_bilateral['Grupo'] = df_media_paciente['Grupo']
             df_bilateral['ID_Paciente'] = df_media_paciente['ID_Paciente']
             df_bilateral['Velocidade (m/s)'] = df_media_paciente['Velocidade (m/s)']
 
-            # Agrupamento Espaço-Temporal
-            if 'Apoio DIR (%)' in df_media_paciente.columns and 'Apoio ESQ (%)' in df_media_paciente.columns:
-                df_bilateral['Apoio Bilat (%)'] = df_media_paciente[['Apoio DIR (%)', 'Apoio ESQ (%)']].mean(axis=1)
-            
-            if 'Clearance DIR (mm)' in df_media_paciente.columns and 'Clearance ESQ (mm)' in df_media_paciente.columns:
-                df_bilateral['Clearance Bilat (mm)'] = df_media_paciente[['Clearance DIR (mm)', 'Clearance ESQ (mm)']].mean(axis=1)
-            
-            if 'Passo DIR (mm)' in df_media_paciente.columns and 'Passo ESQ (mm)' in df_media_paciente.columns:
-                df_bilateral['Passo Bilat (mm)'] = df_media_paciente[['Passo DIR (mm)', 'Passo ESQ (mm)']].mean(axis=1)
-            
-            if 'Passo DIR (% Altura)' in df_media_paciente.columns and 'Passo ESQ (% Altura)' in df_media_paciente.columns:
-                df_bilateral['Passo Norm Bilat (%)'] = df_media_paciente[['Passo DIR (% Altura)', 'Passo ESQ (% Altura)']].mean(axis=1)
-            else:
-                df_bilateral['Passo Norm Bilat (%)'] = np.nan
-
-            # Mapeamento do Vector Coding Segmentar (Média Bilateral)
-            pares_vc = [
-                ('Segm_CP', 'Coxa-Perna', 'CP'),
-                ('Segm_PP', 'Perna-Pé', 'PP')
+            # Cruzamento Espaço-Temporal
+            cols_espaco_temporais = [
+                ('Apoio Bilat (%)', 'Apoio DIR (%)', 'Apoio ESQ (%)'),
+                ('Clearance Bilat (mm)', 'Clearance DIR (mm)', 'Clearance ESQ (mm)'),
+                ('Passo Bilat (mm)', 'Passo DIR (mm)', 'Passo ESQ (mm)'),
+                ('Passo Norm Bilat (%)', 'Passo DIR (% Altura)', 'Passo ESQ (% Altura)')
             ]
-            
+
+            for col_nova, col_d, col_e in cols_espaco_temporais:
+                if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
+                    df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
+
+            # Cruzamento do Vector Coding (Mapeado exatamente como no arquivo CSV de referência)
             modos = ['Proximal (%)', 'EmFase (%)', 'Distal (%)', 'AntiFase (%)']
+            pares_vc = [('Segm_CP', 'CP'), ('Segm_PP', 'PP')]
 
-            for original, nome_art, sigla in pares_vc:
-                # 1. CAV Bruto (Acoplamento Vetorial Médio)
-                col_cav_d = f'CAV {original}_DIR (°)'
-                col_cav_e = f'CAV {original}_ESQ (°)'
-                if col_cav_d in df_media_paciente.columns and col_cav_e in df_media_paciente.columns:
-                    df_bilateral[f'CAV {nome_art} Bilat (°)'] = df_media_paciente[[col_cav_d, col_cav_e]].mean(axis=1)
-                else:
-                    df_bilateral[f'CAV {nome_art} Bilat (°)'] = np.nan
-
-                # 2. Transições
-                col_trans_d = f'Transições {original}_DIR'
-                col_trans_e = f'Transições {original}_ESQ'
-                if col_trans_d in df_media_paciente.columns and col_trans_e in df_media_paciente.columns:
-                    df_bilateral[f'Transições {nome_art} Bilat'] = df_media_paciente[[col_trans_d, col_trans_e]].mean(axis=1)
-                else:
-                    df_bilateral[f'Transições {nome_art} Bilat'] = np.nan
-
-                # 3. Frequências Modais (Apoio e Balanço)
+            for original, sigla in pares_vc:
                 for fase_orig, fase_nova in [('APOIO', 'Apoio'), ('BALANÇO', 'Balanço')]:
                     for modo in modos:
                         col_d = f'{fase_orig} {original}_DIR - {modo}'
@@ -1394,19 +1374,15 @@ if st.session_state.processadores:
                         
                         if col_d in df_media_paciente.columns and col_e in df_media_paciente.columns:
                             df_bilateral[col_nova] = df_media_paciente[[col_d, col_e]].mean(axis=1)
-                        else:
-                            df_bilateral[col_nova] = np.nan
 
-            # Arredondamento e formatação final
             df_bilateral = df_bilateral.round(2)
-
             st.dataframe(df_bilateral, use_container_width=True, hide_index=True)
 
             csv_export_bilateral = df_bilateral.to_csv(index=False, sep=';', decimal=',')
             st.download_button(
-                label="📥 Baixar Tabela Bilateral de Exportação (CSV)",
+                label="📥 Baixar Tabela Bilateral (CSV)",
                 data=csv_export_bilateral,
                 file_name="GPBIO_Resultados_Bilaterais_Export.csv",
                 mime="text/csv",
-                type="secondary"
+                type="primary"
             )
