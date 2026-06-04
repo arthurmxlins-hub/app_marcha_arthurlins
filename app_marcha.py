@@ -635,6 +635,22 @@ class GeradorVisual:
 # FUNÇÕES GLOBAIS STREAMLIT DE FILTRAGEM E CÁLCULO
 # =============================================================================
 
+def exibir_resumo_processamento(processadores, nome_g1, nome_g2):
+    """Conta e exibe na interface quantos arquivos foram processados por grupo."""
+    total = len(processadores)
+    
+    if total == 0:
+        st.warning("⚠️ Nenhum arquivo válido foi processado. Verifique os dados.")
+        return
+    
+    qtd_g1 = sum(1 for p in processadores if p.grupo == nome_g1)
+    qtd_g2 = sum(1 for p in processadores if p.grupo == nome_g2)
+    
+    msg = f"✅ **{total}** arquivos processados e prontos para os cálculos: "
+    msg += f"**{qtd_g1}** no grupo '{nome_g1}' e **{qtd_g2}** no grupo '{nome_g2}'."
+    
+    st.success(msg)
+    
 def calcular_ca_serie(prox_raw, dist_raw, p_obj, hss, tos=None):
     """ Calcula Vector Coding normalizado (Cálculo Angular Bruto) """
     prox_norm_list = p_obj.extrair_ciclos_normalizados(prox_raw, hss, tos)
@@ -712,12 +728,13 @@ if st.button("Processar Arquivos", type="primary", use_container_width=True):
                 
             proc = ProcessadorCinematico(tmp_path, file.name, grupo=nome_grupo, df_antropo=df_antropo)
             if proc.valido: st.session_state.processadores.append(proc)
-            else: st.error(f"Erro: {proc.erro_msg}")
+            else: st.error(f"Erro no arquivo {file.name}: {proc.erro_msg}")
+            
             try: os.remove(tmp_path)
             except Exception: pass 
             progress_bar.progress((i + 1) / len(arquivos_para_processar))
             
-        st.success(f"✅ {len(st.session_state.processadores)} arquivos processados!")
+        exibir_resumo_processamento(st.session_state.processadores, nome_g1, nome_g2)
 
 if st.session_state.processadores:
     grupos_estudo = sorted(list(set([p.grupo for p in st.session_state.processadores])))
