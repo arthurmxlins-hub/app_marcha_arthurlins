@@ -1252,7 +1252,7 @@ if st.session_state.processadores:
             dados_limpos = [dict_dados[l] for l in labels if len(dict_dados[l]) > 0]
             labels_limpos = [l for l in labels if len(dict_dados[l]) > 0]
             if dados_limpos:
-                bp = ax.boxplot(dados_limpos, patch_artist=True, labels=labels_limpos)
+                bp = ax.boxplot(dados_limpos, patch_artist=True, tick_labels=labels_limpos)
                 for i, patch in enumerate(bp['boxes']): 
                     grp_name = labels_limpos[i].split('(')[0] if '(' in labels_limpos[i] else labels_limpos[i]
                     patch.set_facecolor('#d3d3d3' if 'control' in grp_name.lower() else ('#707070' if 'parkinson' in grp_name.lower() else '#999999'))
